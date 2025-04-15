@@ -1,0 +1,299 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelos do Mindforge baseados no TypeScript Definitions
+
+// Usuário
+model User {
+  id                       String    @id @default(uuid())
+  username                 String    @unique
+  email                    String    @unique
+  password                 String
+  profileImageUrl          String?
+  bannerUrl                String?
+  houseId                  String
+  primaryElementalType     String    // Tipo elemental primário
+  secondaryElementalType   String?   // Tipo elemental secundário (desbloqueado no nível 10)
+  level                    Int       @default(1)
+  experience               Int       @default(0)
+  attributePointsToDistribute Int    @default(0)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  // Relacionamentos
+  attributes               UserAttributes?
+  house                    House            @relation(fields: [houseId], references: [id])
+  userInterests            UserInterest[]
+  dailyGoals               UserDailyGoal[]
+  userSkills               UserSkill[]
+  battleParticipant        BattleParticipant[]
+}
+
+// Atributos do Usuário
+model UserAttributes {
+  id               String  @id @default(uuid())
+  userId           String  @unique
+  health           Int     @default(100)
+  physicalAttack   Int     @default(10)
+  specialAttack    Int     @default(10)
+  physicalDefense  Int     @default(10)
+  specialDefense   Int     @default(10)
+  speed            Int     @default(10)
+
+  // Relacionamento
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Interesses
+model Interest {
+  id               String  @id @default(uuid())
+  name             String  @unique
+  description      String?
+
+  // Relacionamentos
+  userInterests    UserInterest[]
+  goalInterests    GoalInterest[]
+}
+
+// Relação Usuário-Interesse
+model UserInterest {
+  userId           String
+  interestId       String
+  createdAt        DateTime @default(now())
+
+  // Relacionamentos
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interest         Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([userId, interestId])
+}
+
+// Habilidades (Skills)
+model Skill {
+  id                String  @id @default(uuid())
+  name              String
+  description       String
+  elementalType     String  // ElementalType
+  attackType        String  // 'physical' ou 'magical'
+  baseDamage        Int
+  accuracy          Int     // 0-100
+  isAoe             Boolean @default(false) // Afeta todos inimigos
+  targetType        String  // 'single' ou 'all_enemies'
+  buffType          String?
+  debuffType        String?
+  statusEffect      String? // StatusEffect
+  
+  // Valores para efeitos adicionais
+  statusEffectChance     Int?
+  statusEffectDuration   Int?
+  buffValue              Int?
+  debuffValue            Int?
+
+  // Relacionamentos
+  userSkills       UserSkill[]
+  enemySkills      EnemySkill[]
+}
+
+// Relação Usuário-Skill
+model UserSkill {
+  id               String  @id @default(uuid())
+  userId           String
+  skillId          String
+  equipped         Boolean @default(false)
+  
+  // Relacionamentos
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill            Skill   @relation(fields: [skillId], references: [id])
+
+  @@unique([userId, skillId])
+}
+
+// Meta (Goal)
+model Goal {
+  id                    String  @id @default(uuid())
+  description           String
+  
+  // Recompensas
+  rewardHealth          Int     @default(0)
+  rewardPhysicalAttack  Int     @default(0)
+  rewardSpecialAttack   Int     @default(0)
+  rewardPhysicalDefense Int     @default(0)
+  rewardSpecialDefense  Int     @default(0)
+  rewardSpeed           Int     @default(0)
+  
+  // Chance de skill
+  hasSkillChance        Boolean @default(false)
+  skillUnlockChance     Int     @default(0) // Percentual
+  
+  // Relacionamentos
+  userDailyGoals        UserDailyGoal[]
+  goalInterests         GoalInterest[]
+}
+
+// Relação Goal-Interest (many-to-many)
+model GoalInterest {
+  goalId           String
+  interestId       String
+  createdAt        DateTime @default(now())
+
+  // Relacionamentos
+  goal             Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  interest         Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([goalId, interestId])
+}
+
+// Meta Diária do Usuário
+model UserDailyGoal {
+  id               String   @id @default(uuid())
+  userId           String
+  goalId           String
+  isOptional       Boolean  @default(false)
+  completed        Boolean  @default(false)
+  dateAssigned     DateTime @default(now())
+  
+  // Relacionamentos
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal             Goal     @relation(fields: [goalId], references: [id])
+}
+
+// Casa
+model House {
+  id               String  @id @default(uuid())
+  name             String  @unique
+  visualTheme      String
+  description      String
+  
+  // Relacionamentos
+  users            User[]
+}
+
+// Inimigo
+model Enemy {
+  id               String  @id @default(uuid())
+  name             String
+  imageUrl         String
+  rarity           String  // EnemyRarity
+  isBoss           Boolean @default(false)
+  elementalType    String  // ElementalType
+  
+  // Atributos
+  health           Int
+  physicalAttack   Int
+  specialAttack    Int
+  physicalDefense  Int
+  specialDefense   Int
+  speed            Int
+  
+  // Relacionamentos
+  enemySkills      EnemySkill[]
+  battleParticipant BattleParticipant[]
+}
+
+// Relação Inimigo-Skill
+model EnemySkill {
+  enemyId          String
+  skillId          String
+  
+  // Relacionamentos
+  enemy            Enemy   @relation(fields: [enemyId], references: [id], onDelete: Cascade)
+  skill            Skill   @relation(fields: [skillId], references: [id])
+
+  @@id([enemyId, skillId])
+}
+
+// Estado de uma Batalha
+model Battle {
+  id               String    @id @default(uuid())
+  currentTurn      Int       @default(1)
+  isFinished       Boolean   @default(false)
+  winnerId         String?
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  
+  // Relacionamentos
+  participants     BattleParticipant[]
+}
+
+// Participante da Batalha (Usuário ou Inimigo)
+model BattleParticipant {
+  id                  String  @id @default(uuid())
+  battleId            String
+  participantType     String  // 'user' ou 'enemy'
+  
+  // IDs separados para usuário e inimigo
+  userId             String?
+  enemyId            String?
+  
+  teamId              String  // identificador do time
+  position            Int     // posição no time (1-5)
+  
+  // Estado atual na batalha
+  currentHealth       Int
+  currentPhysicalAttack Int
+  currentSpecialAttack Int
+  currentPhysicalDefense Int
+  currentSpecialDefense Int
+  currentSpeed        Int
+  
+  // Relacionamentos
+  battle              Battle   @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  user                User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enemy               Enemy?   @relation(fields: [enemyId], references: [id], onDelete: Cascade)
+  statusEffects       BattleStatusEffect[]
+  buffs               BattleBuff[]
+  debuffs             BattleDebuff[]
+
+  // Garantir que um participante seja único por batalha, tipo e posição
+  @@unique([battleId, participantType, position])
+}
+
+// Efeito de Status na Batalha
+model BattleStatusEffect {
+  id                  String  @id @default(uuid())
+  battleParticipantId String
+  type                String  // StatusEffect
+  remainingTurns      Int
+  value               Int     // valor do efeito (ex: dano por turno)
+  
+  // Relacionamento
+  battleParticipant   BattleParticipant @relation(fields: [battleParticipantId], references: [id], onDelete: Cascade)
+}
+
+// Buff na Batalha
+model BattleBuff {
+  id                  String  @id @default(uuid())
+  battleParticipantId String
+  attribute           String  // nome do atributo
+  value               Int
+  remainingTurns      Int
+  stackCount          Int     // máximo 3
+  
+  // Relacionamento
+  battleParticipant   BattleParticipant @relation(fields: [battleParticipantId], references: [id], onDelete: Cascade)
+}
+
+// Debuff na Batalha
+model BattleDebuff {
+  id                  String  @id @default(uuid())
+  battleParticipantId String
+  attribute           String  // nome do atributo
+  value               Int
+  remainingTurns      Int
+  stackCount          Int     // máximo 3
+  
+  // Relacionamento
+  battleParticipant   BattleParticipant @relation(fields: [battleParticipantId], references: [id], onDelete: Cascade)
+}
