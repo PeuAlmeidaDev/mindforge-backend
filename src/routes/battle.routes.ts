@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUserBattles, startRandomBattle, getBattleById, processTurnAction } from '../controllers/battle.controller';
+import { getUserBattles, startRandomBattle, getBattleById, processTurnAction, getBattleRewards } from '../controllers/battle.controller';
 
 const router = Router();
 
@@ -30,5 +30,12 @@ router.post('/random', startRandomBattle);
  * @access  Privado
  */
 router.post('/:id/turn', processTurnAction);
+
+/**
+ * @route   GET /api/battles/:id/rewards
+ * @desc    Obtém as recompensas de uma batalha finalizada
+ * @access  Privado
+ */
+router.get('/:id/rewards', getBattleRewards);
 
 export default router; 

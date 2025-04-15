@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../index';
 import * as battleService from '../services/battle.service';
 import * as battleEngineService from '../services/battle-engine.service';
+import * as battleRewardsService from '../services/battle-rewards.service';
 import { BattleStatusEffect } from '@prisma/client';
 
 /**
@@ -160,6 +161,17 @@ export const processTurnAction = async (req: Request, res: Response) => {
     // Executar o turno da batalha
     const turnResult = await battleEngineService.executeBattleTurn(id, actions);
     
+    // Verifica se a batalha foi finalizada com vitória do jogador, para processar recompensas
+    let rewards = null;
+    if (turnResult.isFinished && turnResult.winnerTeam === 'player') {
+      try {
+        rewards = await battleRewardsService.processBattleRewards(userId, id);
+      } catch (rewardError) {
+        console.error('Erro ao processar recompensas:', rewardError);
+        // Se falhar ao processar recompensas, não interrompemos o fluxo
+      }
+    }
+    
     // Preparar a resposta para o frontend
     return res.status(200).json({
       success: true,
@@ -170,7 +182,8 @@ export const processTurnAction = async (req: Request, res: Response) => {
         winnerTeam: turnResult.winnerTeam,
         actions: turnResult.actionResults,
         participants: turnResult.participants,
-        battle: turnResult.battle
+        battle: turnResult.battle,
+        rewards: rewards // Incluindo as recompensas na resposta, se houver
       }
     });
   } catch (error) {
@@ -179,6 +192,63 @@ export const processTurnAction = async (req: Request, res: Response) => {
     const errorMessage = error instanceof Error 
       ? error.message 
       : 'Erro ao processar turno da batalha';
+    
+    return res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+};
+
+/**
+ * Obtém recompensas de uma batalha finalizada
+ */
+export const getBattleRewards = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    // Verifica se o usuário está autenticado
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Usuário não autenticado'
+      });
+    }
+    
+    const userId = req.user.id;
+    
+    // Verificar se a batalha existe e pertence ao usuário
+    const battle = await battleService.findBattleById(id, userId);
+    
+    if (!battle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Batalha não encontrada'
+      });
+    }
+    
+    // Verificar se a batalha foi finalizada
+    if (!battle.isFinished) {
+      return res.status(400).json({
+        success: false,
+        message: 'Esta batalha ainda não foi finalizada'
+      });
+    }
+    
+    // Buscar as recompensas da batalha
+    const rewards = await battleRewardsService.processBattleRewards(userId, id);
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Recompensas obtidas com sucesso',
+      data: rewards
+    });
+  } catch (error) {
+    console.error('Erro ao obter recompensas da batalha:', error);
+    
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : 'Erro ao obter recompensas da batalha';
     
     return res.status(500).json({
       success: false,

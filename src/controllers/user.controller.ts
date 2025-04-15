@@ -60,11 +60,23 @@ export const updateAttributes = async (req: Request, res: Response) => {
     const userId = req.user!.id;
     const { health, physicalAttack, specialAttack, physicalDefense, specialDefense, speed } = req.body;
 
+    // Validar entrada - valores não podem ser negativos
+    const attributes = { health, physicalAttack, specialAttack, physicalDefense, specialDefense, speed };
+    for (const [key, value] of Object.entries(attributes)) {
+      if (value && (typeof value !== 'number' || value < 0 || !Number.isInteger(value))) {
+        return res.status(400).json({
+          success: false,
+          message: `Valor inválido para o atributo ${key}. Deve ser um número inteiro positivo.`
+        });
+      }
+    }
+
     // Buscar o usuário para verificar os pontos disponíveis
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
-        attributePointsToDistribute: true
+        attributePointsToDistribute: true,
+        attributes: true
       }
     });
 
@@ -72,6 +84,13 @@ export const updateAttributes = async (req: Request, res: Response) => {
       return res.status(404).json({
         success: false,
         message: 'Usuário não encontrado'
+      });
+    }
+
+    if (!user.attributes) {
+      return res.status(404).json({
+        success: false,
+        message: 'Atributos do usuário não encontrados'
       });
     }
 
@@ -85,15 +104,22 @@ export const updateAttributes = async (req: Request, res: Response) => {
       (speed || 0)
     );
 
+    if (totalPoints <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'É necessário distribuir pelo menos 1 ponto de atributo'
+      });
+    }
+
     if (totalPoints > user.attributePointsToDistribute) {
       return res.status(400).json({
         success: false,
-        message: 'Pontos insuficientes para distribuir'
+        message: `Pontos insuficientes para distribuir. Você tem ${user.attributePointsToDistribute} pontos disponíveis.`
       });
     }
 
     // Atualizar os atributos
-    const attributes = await prisma.userAttributes.update({
+    const updatedAttributes = await prisma.userAttributes.update({
       where: { userId },
       data: {
         health: { increment: health || 0 },
@@ -115,10 +141,22 @@ export const updateAttributes = async (req: Request, res: Response) => {
       }
     });
 
+    // Obter usuário atualizado para retornar
+    const updatedUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        attributePointsToDistribute: true,
+        attributes: true
+      }
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Atributos atualizados com sucesso',
-      data: attributes
+      data: {
+        attributes: updatedAttributes,
+        attributePointsToDistribute: updatedUser?.attributePointsToDistribute || 0
+      }
     });
   } catch (error) {
     console.error('Erro ao atualizar atributos:', error);

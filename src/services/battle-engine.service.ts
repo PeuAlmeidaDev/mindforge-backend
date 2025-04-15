@@ -535,13 +535,32 @@ export const executeBattleTurn = async (
 
     let isFinished = false;
     let winnerTeam: string | null = null;
+    let winnerId: string | null = null;
 
     if (!playerTeamAlive) {
       isFinished = true;
       winnerTeam = 'enemy';
+
+      // Encontra o primeiro inimigo vivo para definir como vencedor
+      const winnerParticipant = updatedParticipants.find(p => 
+        p.teamId === 'enemy' && p.currentHealth > 0
+      );
+      
+      if (winnerParticipant && winnerParticipant.enemyId) {
+        winnerId = winnerParticipant.enemyId;
+      }
     } else if (!enemyTeamAlive) {
       isFinished = true;
       winnerTeam = 'player';
+      
+      // Encontra o jogador para definir como vencedor
+      const winnerParticipant = updatedParticipants.find(p => 
+        p.teamId === 'player' && p.userId
+      );
+      
+      if (winnerParticipant && winnerParticipant.userId) {
+        winnerId = winnerParticipant.userId;
+      }
     }
 
     // Atualiza a batalha para o próximo turno ou finaliza
@@ -550,6 +569,8 @@ export const executeBattleTurn = async (
       data: {
         currentTurn: { increment: 1 },
         isFinished: isFinished,
+        winnerId: winnerId,
+        endedAt: isFinished ? new Date() : undefined
       },
       include: {
         participants: {
@@ -561,22 +582,6 @@ export const executeBattleTurn = async (
         }
       }
     });
-
-    // Para o caso de ter um vencedor, atualizamos o campo winnerId no banco
-    if (isFinished && winnerTeam) {
-      // Encontra o primeiro participante do time vencedor
-      const winnerParticipant = updatedParticipants.find(p => p.teamId === winnerTeam);
-      if (winnerParticipant) {
-        await prisma.battle.update({
-          where: { id: battleId },
-          data: {
-            winnerId: winnerParticipant.participantType === 'user' 
-              ? winnerParticipant.userId 
-              : winnerParticipant.enemyId
-          }
-        });
-      }
-    }
 
     return {
       battle: updatedBattle,
