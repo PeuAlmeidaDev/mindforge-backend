@@ -1,7 +1,10 @@
-import { prisma } from '../index';
+import { HouseAssignmentRepository, InterestToHouseMap } from '../repositories/house-assignment.repository';
+
+// Repositório para operações relacionadas às casas
+const repository = new HouseAssignmentRepository();
 
 // Mapeamento de interesses para casas
-const interestToHouseMapping = {
+const interestToHouseMapping: InterestToHouseMap = {
   // Formato: 'ID do interesse': ['ID da Casa 1', 'ID da Casa 2', ...]
   'saude-fitness': ['casa1', 'casa4'],
   'criatividade-expressao': ['casa2', 'casa3', 'casa5'],
@@ -23,45 +26,32 @@ const interestToHouseMapping = {
  */
 export const determineUserHouse = async (interestIds: string[]): Promise<string> => {
   try {
-    // Primeiro, buscar todos os interesses do usuário para obter seus nomes (slugs)
-    const interests = await prisma.interest.findMany({
-      where: {
-        id: {
-          in: interestIds
-        }
-      },
-      select: {
-        id: true,
-        name: true
-      }
-    });
+    // Buscar todos os interesses do usuário para obter seus nomes (slugs)
+    const interests = await repository.findInterests(interestIds);
+
+    // Verificação para debug
+    console.log("Interesses encontrados:", interests);
 
     // Contagem de "votos" para cada casa
     const houseVotes: Record<string, number> = {};
 
     // Inicializar contagem para todas as casas
-    const houses = await prisma.house.findMany({
-      select: { id: true }
-    });
+    const houses = await repository.findAllHouses();
     
     houses.forEach(house => {
       houseVotes[house.id] = 0;
     });
 
+    // Converter interesses para slugs
+    const interestSlugs = repository.convertInterestsToSlugs(interests);
+
     // Para cada interesse do usuário, adicionar votos para as casas correspondentes
-    interests.forEach(interest => {
-      // Converter o nome do interesse para um formato de slug
-      const interestSlug = interest.name
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-        .replace(/[^a-z0-9]+/g, '-');     // Substitui caracteres não alfanuméricos por hífen
-      
+    interestSlugs.forEach(interestSlug => {      
       // Obter as casas associadas a este interesse
-      const associatedHouses = interestToHouseMapping[interestSlug] || [];
+      const associatedHouses = interestToHouseMapping[interestSlug as keyof typeof interestToHouseMapping] || [];
       
       // Adicionar um voto para cada casa associada
-      associatedHouses.forEach(houseId => {
+      associatedHouses.forEach((houseId: string) => {
         if (houseVotes[houseId] !== undefined) {
           houseVotes[houseId] += 1;
         }
@@ -69,7 +59,7 @@ export const determineUserHouse = async (interestIds: string[]): Promise<string>
     });
 
     // Encontrar a casa com mais votos
-    let recommendedHouseId = houses[0]?.id;
+    let recommendedHouseId = houses[0]?.id || '';
     let maxVotes = 0;
 
     Object.entries(houseVotes).forEach(([houseId, votes]) => {
@@ -93,7 +83,7 @@ export const determineUserHouse = async (interestIds: string[]): Promise<string>
   } catch (error) {
     console.error('Erro ao determinar casa do usuário:', error);
     // Se houver erro, retornar a primeira casa como fallback
-    const firstHouse = await prisma.house.findFirst();
+    const firstHouse = await repository.findFirstHouse();
     return firstHouse?.id || 'casa1';
   }
 };
@@ -104,28 +94,33 @@ export const determineUserHouse = async (interestIds: string[]): Promise<string>
 export const setupHouseMapping = async (): Promise<void> => {
   try {
     // Obter todas as casas
-    const houses = await prisma.house.findMany({
-      select: {
-        id: true,
-        name: true
-      }
-    });
+    const houses = await repository.findAllHouses();
+
+    if (!houses || houses.length === 0) {
+      console.error('Nenhuma casa encontrada no banco de dados');
+      return;
+    }
 
     // Criar mapeamento de nome das casas para IDs
     const houseNameToIdMap: Record<string, string> = {};
     houses.forEach(house => {
+      if (!house || !house.name) {
+        console.warn('Casa sem nome encontrada:', house);
+        return;
+      }
+
       const houseName = house.name.toLowerCase().includes('kazoku') ? 'Casa do Lobo' :
-                       house.name.toLowerCase().includes('água') ? 'Águas Flamejantes' :
-                       house.name.toLowerCase().includes('três') ? 'Três Faces' :
-                       house.name.toLowerCase().includes('rugido') ? 'Chamas do Rugido' :
-                       house.name.toLowerCase().includes('dourado') ? 'Espírito Dourado' :
-                       house.name;
+                      house.name.toLowerCase().includes('água') ? 'Águas Flamejantes' :
+                      house.name.toLowerCase().includes('três') ? 'Três Faces' :
+                      house.name.toLowerCase().includes('rugido') ? 'Chamas do Rugido' :
+                      house.name.toLowerCase().includes('dourado') ? 'Espírito Dourado' :
+                      house.name;
       
       houseNameToIdMap[houseName] = house.id;
     });
 
     // Atualizar o mapeamento com os IDs reais
-    const newMapping: Record<string, string[]> = {};
+    const newMapping: InterestToHouseMap = {};
     
     // Para cada entrada do mapeamento original
     Object.entries(interestToHouseMapping).forEach(([interestSlug, houseNames]) => {
@@ -144,6 +139,7 @@ export const setupHouseMapping = async (): Promise<void> => {
     // Substituir o mapeamento original pelo novo com IDs reais
     Object.assign(interestToHouseMapping, newMapping);
     
+    console.log('Mapeamento de casas configurado com sucesso');
   } catch (error) {
     console.error('Erro ao configurar mapeamento de casas:', error);
   }

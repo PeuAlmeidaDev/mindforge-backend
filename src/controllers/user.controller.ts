@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
-import { prisma } from '../index';
+import { ResponseBuilder } from '../utils/response';
+import { UserService } from '../services/user.service';
+import { ValidationError, NotFoundError, InternalServerError } from '../utils/error';
 
 /**
  * Obtém o perfil do usuário autenticado
@@ -7,48 +9,14 @@ import { prisma } from '../index';
 export const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        attributes: true,
-        house: true,
-        userInterests: {
-          include: {
-            interest: true
-          }
-        },
-        userSkills: {
-          include: {
-            skill: true
-          },
-          where: {
-            equipped: true
-          }
-        }
-      }
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuário não encontrado'
-      });
-    }
-
-    // Remover a senha da resposta
-    const { password, ...userWithoutPassword } = user;
-
-    return res.status(200).json({
-      success: true,
-      data: userWithoutPassword
-    });
+    const user = await UserService.getProfile(userId);
+    return ResponseBuilder.success(res, user);
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      return ResponseBuilder.error(res, error.message, undefined, 404);
+    }
     console.error('Erro ao obter perfil do usuário:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Erro interno no servidor'
-    });
+    return ResponseBuilder.error(res, 'Erro interno no servidor', undefined, 500);
   }
 };
 
@@ -59,111 +27,32 @@ export const updateAttributes = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
     const { health, physicalAttack, specialAttack, physicalDefense, specialDefense, speed } = req.body;
-
-    // Validar entrada - valores não podem ser negativos
-    const attributes = { health, physicalAttack, specialAttack, physicalDefense, specialDefense, speed };
-    for (const [key, value] of Object.entries(attributes)) {
-      if (value && (typeof value !== 'number' || value < 0 || !Number.isInteger(value))) {
-        return res.status(400).json({
-          success: false,
-          message: `Valor inválido para o atributo ${key}. Deve ser um número inteiro positivo.`
-        });
-      }
-    }
-
-    // Buscar o usuário para verificar os pontos disponíveis
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        attributePointsToDistribute: true,
-        attributes: true
-      }
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuário não encontrado'
-      });
-    }
-
-    if (!user.attributes) {
-      return res.status(404).json({
-        success: false,
-        message: 'Atributos do usuário não encontrados'
-      });
-    }
-
-    // Verificar se o usuário tem pontos suficientes
-    const totalPoints = (
-      (health || 0) + 
-      (physicalAttack || 0) + 
-      (specialAttack || 0) + 
-      (physicalDefense || 0) + 
-      (specialDefense || 0) + 
-      (speed || 0)
+    
+    const attributeUpdates = { 
+      health, 
+      physicalAttack, 
+      specialAttack, 
+      physicalDefense, 
+      specialDefense, 
+      speed 
+    };
+    
+    const result = await UserService.updateAttributes(userId, attributeUpdates);
+    
+    return ResponseBuilder.success(
+      res,
+      result,
+      'Atributos atualizados com sucesso'
     );
-
-    if (totalPoints <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'É necessário distribuir pelo menos 1 ponto de atributo'
-      });
-    }
-
-    if (totalPoints > user.attributePointsToDistribute) {
-      return res.status(400).json({
-        success: false,
-        message: `Pontos insuficientes para distribuir. Você tem ${user.attributePointsToDistribute} pontos disponíveis.`
-      });
-    }
-
-    // Atualizar os atributos
-    const updatedAttributes = await prisma.userAttributes.update({
-      where: { userId },
-      data: {
-        health: { increment: health || 0 },
-        physicalAttack: { increment: physicalAttack || 0 },
-        specialAttack: { increment: specialAttack || 0 },
-        physicalDefense: { increment: physicalDefense || 0 },
-        specialDefense: { increment: specialDefense || 0 },
-        speed: { increment: speed || 0 }
-      }
-    });
-
-    // Atualizar os pontos disponíveis
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        attributePointsToDistribute: {
-          decrement: totalPoints
-        }
-      }
-    });
-
-    // Obter usuário atualizado para retornar
-    const updatedUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        attributePointsToDistribute: true,
-        attributes: true
-      }
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Atributos atualizados com sucesso',
-      data: {
-        attributes: updatedAttributes,
-        attributePointsToDistribute: updatedUser?.attributePointsToDistribute || 0
-      }
-    });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return ResponseBuilder.error(res, error.message);
+    }
+    if (error instanceof NotFoundError) {
+      return ResponseBuilder.error(res, error.message, undefined, 404);
+    }
     console.error('Erro ao atualizar atributos:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Erro interno no servidor'
-    });
+    return ResponseBuilder.error(res, 'Erro interno no servidor', undefined, 500);
   }
 };
 
@@ -173,85 +62,20 @@ export const updateAttributes = async (req: Request, res: Response) => {
 export const manageEquippedSkills = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const { skillIds } = req.body;
-
-    // Verificar se foram enviados os IDs das habilidades
-    if (!skillIds || !Array.isArray(skillIds)) {
-      return res.status(400).json({
-        success: false,
-        message: 'É necessário fornecer um array de IDs de habilidades'
-      });
-    }
-
-    // Verificar se o usuário não está tentando equipar mais de 4 habilidades
-    if (skillIds.length > 4) {
-      return res.status(400).json({
-        success: false,
-        message: 'Você só pode equipar até 4 habilidades'
-      });
-    }
-
-    // Verificar se todas as habilidades pertencem ao usuário
-    const userSkills = await prisma.userSkill.findMany({
-      where: {
-        userId,
-        skillId: {
-          in: skillIds
-        }
-      }
-    });
-
-    if (userSkills.length !== skillIds.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Uma ou mais habilidades não pertencem ao usuário'
-      });
-    }
-
-    // Primeiro, desequipar todas as habilidades
-    await prisma.userSkill.updateMany({
-      where: {
-        userId
-      },
-      data: {
-        equipped: false
-      }
-    });
-
-    // Equipar as habilidades selecionadas
-    await prisma.userSkill.updateMany({
-      where: {
-        userId,
-        skillId: {
-          in: skillIds
-        }
-      },
-      data: {
-        equipped: true
-      }
-    });
-
-    // Buscar as habilidades equipadas atualizadas
-    const equippedSkills = await prisma.userSkill.findMany({
-      where: {
-        userId,
-        equipped: true
-      },
-      include: {
-        skill: true
-      }
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Habilidades equipadas com sucesso',
-      data: equippedSkills
-    });
+    const { equippedSkills } = req.body;
+    
+    const equipedSkills = await UserService.manageEquippedSkills(userId, equippedSkills);
+    
+    return ResponseBuilder.success(
+      res,
+      equipedSkills,
+      'Habilidades equipadas com sucesso'
+    );
   } catch (error) {
-    console.error('Erro ao gerenciar habilidades equipadas:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Erro interno no servidor'
-    });
+    if (error instanceof ValidationError) {
+      return ResponseBuilder.error(res, error.message);
+    }
+    console.error('Erro ao gerenciar habilidades:', error);
+    return ResponseBuilder.error(res, 'Erro interno no servidor', undefined, 500);
   }
 }; 

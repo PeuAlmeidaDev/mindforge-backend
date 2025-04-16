@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
-import { prisma } from '../index';
+import { prisma } from '../database/prisma';
 import * as battleService from '../services/battle.service';
 import * as battleEngineService from '../services/battle-engine.service';
 import * as battleRewardsService from '../services/battle-rewards.service';
 import { BattleStatusEffect } from '@prisma/client';
+import { ResponseBuilder } from '../utils/response';
 
 /**
  * Obtém todas as batalhas do usuário atual
@@ -12,26 +13,16 @@ export const getUserBattles = async (req: Request, res: Response) => {
   try {
     // Verifica se o usuário está autenticado
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuário não autenticado'
-      });
+      return ResponseBuilder.error(res, 'Usuário não autenticado', undefined, 401);
     }
 
     const userId = req.user.id;
     const battles = await battleService.findUserBattles(userId);
 
-    return res.status(200).json({
-      success: true,
-      message: 'Batalhas obtidas com sucesso',
-      data: battles
-    });
+    return ResponseBuilder.success(res, battles, 'Batalhas obtidas com sucesso');
   } catch (error) {
     console.error('Erro ao obter batalhas do usuário:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Erro ao obter batalhas'
-    });
+    return ResponseBuilder.error(res, 'Erro ao obter batalhas', undefined, 500);
   }
 };
 
@@ -42,10 +33,7 @@ export const startRandomBattle = async (req: Request, res: Response) => {
   try {
     // Verifica se o usuário está autenticado
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuário não autenticado'
-      });
+      return ResponseBuilder.error(res, 'Usuário não autenticado', undefined, 401);
     }
 
     const userId = req.user.id;
@@ -56,22 +44,14 @@ export const startRandomBattle = async (req: Request, res: Response) => {
       difficulty as 'easy' | 'normal' | 'hard'
     );
 
-    return res.status(201).json({
-      success: true,
-      message: 'Batalha iniciada com sucesso',
-      data: battle
-    });
+    return ResponseBuilder.success(res, battle, 'Batalha iniciada com sucesso', 201);
   } catch (error) {
     console.error('Erro ao iniciar batalha:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Erro ao iniciar batalha';
+    const statusCode = errorMessage.includes('não encontrado') ? 404 : 500;
     
-    return res.status(
-      errorMessage.includes('não encontrado') ? 404 : 500
-    ).json({
-      success: false,
-      message: errorMessage
-    });
+    return ResponseBuilder.error(res, errorMessage, undefined, statusCode);
   }
 };
 
@@ -84,33 +64,20 @@ export const getBattleById = async (req: Request, res: Response) => {
     
     // Verifica se o usuário está autenticado
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuário não autenticado'
-      });
+      return ResponseBuilder.error(res, 'Usuário não autenticado', undefined, 401);
     }
     
     const userId = req.user.id;
     const battle = await battleService.findBattleById(id, userId);
 
     if (!battle) {
-      return res.status(404).json({
-        success: false,
-        message: 'Batalha não encontrada'
-      });
+      return ResponseBuilder.error(res, 'Batalha não encontrada', undefined, 404);
     }
 
-    return res.status(200).json({
-      success: true,
-      message: 'Batalha obtida com sucesso',
-      data: battle
-    });
+    return ResponseBuilder.success(res, battle, 'Batalha obtida com sucesso');
   } catch (error) {
     console.error('Erro ao obter batalha:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Erro ao obter batalha'
-    });
+    return ResponseBuilder.error(res, 'Erro ao obter batalha', undefined, 500);
   }
 };
 
@@ -124,10 +91,7 @@ export const processTurnAction = async (req: Request, res: Response) => {
     
     // Verifica se o usuário está autenticado
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuário não autenticado'
-      });
+      return ResponseBuilder.error(res, 'Usuário não autenticado', undefined, 401);
     }
     
     const userId = req.user.id;
@@ -136,29 +100,20 @@ export const processTurnAction = async (req: Request, res: Response) => {
     const battle = await battleService.findBattleById(id, userId);
     
     if (!battle) {
-      return res.status(404).json({
-        success: false,
-        message: 'Batalha não encontrada'
-      });
+      return ResponseBuilder.error(res, 'Batalha não encontrada', undefined, 404);
     }
     
     // Verificar se a batalha já foi finalizada
     if (battle.isFinished) {
-      return res.status(400).json({
-        success: false,
-        message: 'Esta batalha já foi finalizada'
-      });
+      return ResponseBuilder.error(res, 'Esta batalha já foi finalizada');
     }
     
     // Validar as ações de turno
     if (!actions || !Array.isArray(actions) || actions.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Ações de turno inválidas'
-      });
+      return ResponseBuilder.error(res, 'Ações de turno inválidas');
     }
     
-    // Executar o turno da batalha
+    // Executar o turno da batalha com o sistema refatorado
     const turnResult = await battleEngineService.executeBattleTurn(id, actions);
     
     // Verifica se a batalha foi finalizada com vitória do jogador, para processar recompensas
@@ -173,10 +128,9 @@ export const processTurnAction = async (req: Request, res: Response) => {
     }
     
     // Preparar a resposta para o frontend
-    return res.status(200).json({
-      success: true,
-      message: 'Turno processado com sucesso',
-      data: {
+    return ResponseBuilder.success(
+      res, 
+      {
         turnNumber: battle.currentTurn + 1,
         isFinished: turnResult.isFinished,
         winnerTeam: turnResult.winnerTeam,
@@ -184,8 +138,9 @@ export const processTurnAction = async (req: Request, res: Response) => {
         participants: turnResult.participants,
         battle: turnResult.battle,
         rewards: rewards // Incluindo as recompensas na resposta, se houver
-      }
-    });
+      },
+      'Turno processado com sucesso'
+    );
   } catch (error) {
     console.error('Erro ao processar turno da batalha:', error);
     
@@ -193,10 +148,7 @@ export const processTurnAction = async (req: Request, res: Response) => {
       ? error.message 
       : 'Erro ao processar turno da batalha';
     
-    return res.status(500).json({
-      success: false,
-      message: errorMessage
-    });
+    return ResponseBuilder.error(res, errorMessage, undefined, 500);
   }
 };
 
@@ -207,53 +159,57 @@ export const getBattleRewards = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
+    console.log(`Solicitação de recompensas para batalha ID: ${id}`);
+    
     // Verifica se o usuário está autenticado
     if (!req.user || !req.user.id) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuário não autenticado'
-      });
+      return ResponseBuilder.error(res, 'Usuário não autenticado', undefined, 401);
     }
     
     const userId = req.user.id;
+    console.log(`Usuário autenticado: ${userId}`);
     
     // Verificar se a batalha existe e pertence ao usuário
     const battle = await battleService.findBattleById(id, userId);
     
     if (!battle) {
-      return res.status(404).json({
-        success: false,
-        message: 'Batalha não encontrada'
-      });
+      console.log(`Batalha ${id} não encontrada para o usuário ${userId}`);
+      return ResponseBuilder.error(res, 'Batalha não encontrada', undefined, 404);
     }
+    
+    console.log(`Batalha encontrada: ${id}, finalizada: ${battle.isFinished}`);
     
     // Verificar se a batalha foi finalizada
     if (!battle.isFinished) {
-      return res.status(400).json({
-        success: false,
-        message: 'Esta batalha ainda não foi finalizada'
-      });
+      return ResponseBuilder.error(res, 'Esta batalha ainda não foi finalizada');
     }
     
     // Buscar as recompensas da batalha
-    const rewards = await battleRewardsService.processBattleRewards(userId, id);
-    
-    return res.status(200).json({
-      success: true,
-      message: 'Recompensas obtidas com sucesso',
-      data: rewards
-    });
+    try {
+      const rewards = await battleRewardsService.processBattleRewards(userId, id);
+      return ResponseBuilder.success(res, rewards, 'Recompensas obtidas com sucesso');
+    } catch (rewardError) {
+      if (rewardError instanceof Error) {
+        const errorMessage = rewardError.message;
+        
+        // Mapear mensagens de erro específicas para códigos HTTP apropriados
+        if (errorMessage.includes('já recebeu recompensas por esta batalha')) {
+          return ResponseBuilder.error(res, errorMessage, undefined, 400);
+        } else if (errorMessage.includes('não pode receber recompensas por uma batalha que não venceu')) {
+          return ResponseBuilder.error(res, errorMessage, undefined, 403);
+        } else if (errorMessage.includes('Batalha não finalizada')) {
+          return ResponseBuilder.error(res, errorMessage, undefined, 400);
+        } else if (errorMessage.includes('Usuário não participou desta batalha')) {
+          return ResponseBuilder.error(res, errorMessage, undefined, 403);
+        }
+      }
+      
+      console.error('Erro ao processar recompensas:', rewardError);
+      return ResponseBuilder.error(res, 'Erro ao processar recompensas da batalha', undefined, 500);
+    }
   } catch (error) {
     console.error('Erro ao obter recompensas da batalha:', error);
-    
-    const errorMessage = error instanceof Error 
-      ? error.message 
-      : 'Erro ao obter recompensas da batalha';
-    
-    return res.status(500).json({
-      success: false,
-      message: errorMessage
-    });
+    return ResponseBuilder.error(res, 'Erro ao obter recompensas da batalha', undefined, 500);
   }
 };
 

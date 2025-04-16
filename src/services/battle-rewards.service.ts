@@ -1,38 +1,28 @@
-import { PrismaClient } from '@prisma/client';
-import { prisma } from '../index';
+import { PrismaClient, Battle } from '@prisma/client';
+import { BattleRewardsRepository } from '../repositories/battle-rewards.repository';
 
-/**
- * Interface para as recompensas de batalha
- */
-interface BattleRewards {
+// Definição local da interface de recompensas
+export interface BattleRewards {
   experience: number;
   levelUp?: boolean;
   attributePointsGained?: number;
 }
 
+// Instância do repositório de recompensas
+const battleRewardsRepository = new BattleRewardsRepository();
+
 /**
  * Calcula a quantidade de experiência necessária para avançar para o próximo nível
  */
 export const calculateExperienceForNextLevel = (currentLevel: number): number => {
-  // Fórmula para calcular experiência necessária para o próximo nível
-  // Aqui usamos uma fórmula simples, mas pode ser ajustada conforme necessário
-  return Math.floor(100 * Math.pow(1.5, currentLevel - 1));
+  return battleRewardsRepository.calculateExperienceForNextLevel(currentLevel);
 };
 
 /**
  * Calcula a experiência ganha após vencer uma batalha
  */
 export const calculateBattleExperience = (enemyLevels: number[], difficulty: string): number => {
-  // Calcula a média do nível dos inimigos
-  const averageEnemyLevel = enemyLevels.reduce((sum, level) => sum + level, 0) / enemyLevels.length;
-  
-  // Bônus de experiência baseado na dificuldade
-  const difficultyMultiplier = difficulty === 'easy' ? 1 : 
-                              difficulty === 'normal' ? 1.25 : 
-                              difficulty === 'hard' ? 1.5 : 1;
-  
-  // Experiência base + modificador de nível e dificuldade
-  return Math.floor(20 * averageEnemyLevel * difficultyMultiplier);
+  return battleRewardsRepository.calculateBattleExperience(enemyLevels, difficulty);
 };
 
 /**
@@ -44,20 +34,12 @@ export const checkLevelUp = async (
   currentLevel: number, 
   expGained: number
 ): Promise<{newLevel: number, leveledUp: boolean, newAttributePoints: number}> => {
-  let newLevel = currentLevel;
-  let leveledUp = false;
-  let newAttributePoints = 0;
-  let totalExp = currentExp + expGained;
-  
-  // Verifica se o usuário ganhou algum nível
-  while (totalExp >= calculateExperienceForNextLevel(newLevel)) {
-    totalExp -= calculateExperienceForNextLevel(newLevel);
-    newLevel++;
-    leveledUp = true;
-    newAttributePoints += 3; // 3 pontos de atributo por nível
-  }
-  
-  return { newLevel, leveledUp, newAttributePoints };
+  const result = battleRewardsRepository.checkLevelUp(currentLevel, currentExp, expGained);
+  return {
+    newLevel: result.newLevel,
+    leveledUp: result.leveledUp,
+    newAttributePoints: result.newAttributePoints
+  };
 };
 
 /**
@@ -68,27 +50,53 @@ export const processBattleRewards = async (
   battleId: string
 ): Promise<BattleRewards> => {
   try {
-    // Busca informações da batalha
-    const battle = await prisma.battle.findUnique({
-      where: { id: battleId },
-      include: {
-        participants: {
-          include: {
-            enemy: true,
-            user: true
-          }
-        }
-      }
-    });
+    // Validar os parâmetros de entrada
+    if (!userId || !battleId) {
+      console.error(`Parâmetros inválidos: userId=${userId}, battleId=${battleId}`);
+      throw new Error('Parâmetros inválidos');
+    }
+    
+    console.log(`Processando recompensas para: userId=${userId}, battleId=${battleId}`);
+    
+    // Verificar se o usuário já recebeu recompensas por esta batalha
+    const alreadyRewarded = await battleRewardsRepository.hasReceivedReward(userId, battleId);
+    if (alreadyRewarded) {
+      console.log(`Usuário ${userId} já recebeu recompensas pela batalha ${battleId}`);
+      throw new Error('Você já recebeu recompensas por esta batalha');
+    }
+    
+    // Busca informações da batalha usando o repositório
+    const battle = await battleRewardsRepository.findBattleWithParticipants(battleId);
 
-    // Verifica se a batalha existe e se foi concluída
-    if (!battle || !battle.isFinished) {
-      throw new Error('Batalha não finalizada ou não encontrada');
+    console.log(`Resultado da busca da batalha:`, battle ? 'Batalha encontrada' : 'Batalha não encontrada');
+
+    if (!battle) {
+      console.error(`Batalha com ID ${battleId} não encontrada no banco de dados`);
+      throw new Error(`Batalha com ID ${battleId} não encontrada`);
+    }
+    
+    // Asserção de tipo para garantir que o TypeScript reconheça as propriedades adicionais
+    const battleWithParticipants = battle as Battle & { 
+      participants: Array<{
+        userId?: string;
+        teamId: string;
+        currentHealth: number;
+        enemy?: any;
+      }> 
+    };
+    
+    console.log(`Participantes na batalha: ${battleWithParticipants.participants.length}`);
+    
+    // Verificar se a batalha foi concluída
+    if (!battle.isFinished) {
+      throw new Error('Batalha não finalizada');
     }
 
-    // Verifica se o usuário participou da batalha
-    const userParticipant = battle.participants.find(p => p.userId === userId);
+    // Verificar se o usuário participou da batalha
+    const userParticipant = battleWithParticipants.participants.find(p => p.userId === userId);
+    
     if (!userParticipant) {
+      console.error(`Usuário ${userId} não encontrado entre os participantes da batalha`);
       throw new Error('Usuário não participou desta batalha');
     }
 
@@ -97,27 +105,25 @@ export const processBattleRewards = async (
     const playerTeam = userParticipant.teamId;
     
     // Verifica se todos os inimigos foram derrotados (vida <= 0)
-    const enemyTeam = battle.participants.find(p => p.userId !== userId && p.teamId !== playerTeam)?.teamId;
-    const playerTeamWon = battle.participants.every(p => 
+    const enemyTeam = battleWithParticipants.participants.find(p => p.userId !== userId && p.teamId !== playerTeam)?.teamId;
+    const playerTeamWon = battleWithParticipants.participants.every(p => 
       p.teamId === playerTeam || p.currentHealth <= 0
     );
     
     // Se o jogador não venceu, não dá recompensa
     if (!playerTeamWon) {
-      return { experience: 0 }; // Não ganha recompensa se não venceu
+      throw new Error('Você não pode receber recompensas por uma batalha que não venceu');
     }
 
     // Busca o usuário e suas informações atuais
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    const user = await battleRewardsRepository.findUserWithExperience(userId);
 
     if (!user) {
       throw new Error('Usuário não encontrado');
     }
 
     // Extrai níveis dos inimigos (assumindo que eles possuem um nível baseado em seus atributos)
-    const enemyLevels = battle.participants
+    const enemyLevels = battleWithParticipants.participants
       .filter(p => p.teamId !== playerTeam && p.enemy)
       .map(p => Math.max(1, Math.floor((
         p.enemy!.physicalAttack + 
@@ -131,28 +137,31 @@ export const processBattleRewards = async (
                       enemyLevels.length <= 2 ? 'normal' : 'hard';
                       
     // Calcula a experiência ganha
-    const experienceGained = calculateBattleExperience(enemyLevels, difficulty);
+    const experienceGained = battleRewardsRepository.calculateBattleExperience(enemyLevels, difficulty);
     
     // Verifica se o usuário subiu de nível
-    const { newLevel, leveledUp, newAttributePoints } = await checkLevelUp(
-      userId,
-      user.experience,
+    const { newLevel, leveledUp, newAttributePoints, newExp } = battleRewardsRepository.checkLevelUp(
       user.level,
+      user.experience,
       experienceGained
     );
     
     // Atualiza o usuário com a experiência ganha e possível novo nível
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        experience: user.experience + experienceGained - (leveledUp ? 
-          calculateExperienceForNextLevel(user.level) : 0),
-        level: newLevel,
-        attributePointsToDistribute: {
-          increment: newAttributePoints
-        }
-      }
-    });
+    await battleRewardsRepository.updateUserExperience(
+      userId,
+      newLevel,
+      newExp,
+      newAttributePoints
+    );
+    
+    // Registra que o usuário recebeu recompensas por esta batalha
+    await battleRewardsRepository.registerRewardReceived(
+      userId,
+      battleId,
+      experienceGained,
+      leveledUp,
+      newAttributePoints
+    );
     
     // Retorna as recompensas processadas
     return {

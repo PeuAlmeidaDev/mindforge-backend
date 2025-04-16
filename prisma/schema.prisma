@@ -297,3 +297,21 @@ model BattleDebuff {
   // Relacionamento
   battleParticipant   BattleParticipant @relation(fields: [battleParticipantId], references: [id], onDelete: Cascade)
 }
+
+// Recompensas recebidas por batalha
+model BattleReward {
+  id                  String    @id @default(uuid())
+  userId              String
+  battleId            String
+  experienceGained    Int
+  leveledUp           Boolean   @default(false)
+  attributePointsGained Int     @default(0)
+  rewardedAt          DateTime  @default(now())
+  
+  // Relacionamentos - opcional, se quiser acessar direto do modelo
+  // user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // battle              Battle   @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  
+  // Garantir que cada usuário só receba recompensa uma vez por batalha
+  @@unique([userId, battleId])
+}

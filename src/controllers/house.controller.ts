@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../index';
+import { ResponseBuilder } from '../utils/response';
 
 /**
  * Lista todas as casas disponíveis
@@ -14,9 +15,9 @@ export const listHouses = async (req: Request, res: Response) => {
       }
     });
     
-    return res.status(200).json(houses);
+    return ResponseBuilder.success(res, houses);
   } catch (error) {
     console.error('Erro ao listar casas:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor ao listar casas' });
+    return ResponseBuilder.error(res, 'Erro interno do servidor ao listar casas', undefined, 500);
   }
 }; 

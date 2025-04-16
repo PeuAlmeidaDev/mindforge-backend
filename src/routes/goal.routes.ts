@@ -1,5 +1,8 @@
 import { Router } from 'express';
+import { validate } from '../middlewares/validation.middleware';
 import { getDailyGoals, generateDailyGoals, completeGoal } from '../controllers/goal.controller';
+import { goalCompleteSchema, goalIdParamSchema } from '../validators/goal';
+import { z } from 'zod';
 
 const router = Router();
 
@@ -22,6 +25,10 @@ router.post('/generate', generateDailyGoals);
  * @desc    Marca uma meta como concluída
  * @access  Privado
  */
-router.put('/complete/:goalId', completeGoal);
+router.put(
+  '/complete/:goalId', 
+  validate(z.object({ goalId: z.string().uuid() }), 'params'),
+  completeGoal
+);
 
 export default router; 

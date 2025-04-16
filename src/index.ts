@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import PrismaInstance, { prisma } from './database/prisma';
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
 import goalRoutes from './routes/goal.routes';
@@ -9,13 +9,11 @@ import battleRoutes from './routes/battle.routes';
 import houseRoutes from './routes/house.routes';
 import interestRoutes from './routes/interest.routes';
 import { authMiddleware } from './middlewares/auth.middleware';
+import { errorMiddleware } from './middlewares/error.middleware';
 import { setupHouseMapping } from './services/house-assignment.service';
 
 // Carregar variáveis de ambiente
 dotenv.config();
-
-// Inicializar o Prisma Client
-export const prisma = new PrismaClient();
 
 // Criar aplicação Express
 const app = express();
@@ -38,6 +36,9 @@ app.get('/', (req, res) => {
   res.send('API do Mindforge funcionando! 🚀');
 });
 
+// Middleware de tratamento de erros (deve ser o último)
+app.use(errorMiddleware);
+
 // Iniciar o servidor
 app.listen(PORT, async () => {
   console.log(`Servidor rodando na porta ${PORT}`);
@@ -49,7 +50,7 @@ app.listen(PORT, async () => {
 
 // Tratamento de erros e encerramento
 process.on('SIGINT', async () => {
-  await prisma.$disconnect();
+  await PrismaInstance.disconnect();
   console.log('Conexão com o banco de dados fechada');
   process.exit(0);
 });

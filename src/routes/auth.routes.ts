@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { validate } from '../middlewares/validation.middleware';
 import {
   register,
   login,
   verifyToken
 } from '../controllers/auth.controller';
 import { getProfile } from '../controllers/user.controller';
+import { userLoginSchema, userRegisterSchema } from '../validators/user';
 
 const router = Router();
 
@@ -14,14 +16,14 @@ const router = Router();
  * @desc    Registra um novo usuário
  * @access  Público
  */
-router.post('/register', register);
+router.post('/register', validate(userRegisterSchema), register);
 
 /**
  * @route   POST /api/auth/login
  * @desc    Autentica um usuário existente
  * @access  Público
  */
-router.post('/login', login);
+router.post('/login', validate(userLoginSchema), login);
 
 /**
  * @route   GET /api/auth/verify

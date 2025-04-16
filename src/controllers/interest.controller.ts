@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../index';
+import { ResponseBuilder } from '../utils/response';
 
 /**
  * Lista todos os interesses disponíveis
@@ -14,9 +15,9 @@ export const listInterests = async (req: Request, res: Response) => {
       }
     });
     
-    return res.status(200).json(interests);
+    return ResponseBuilder.success(res, interests);
   } catch (error) {
     console.error('Erro ao listar interesses:', error);
-    return res.status(500).json({ message: 'Erro interno do servidor ao listar interesses' });
+    return ResponseBuilder.error(res, 'Erro interno do servidor ao listar interesses', undefined, 500);
   }
 }; 

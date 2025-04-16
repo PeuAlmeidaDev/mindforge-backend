@@ -1,17 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../index';
+import { prisma } from '../database/prisma';
+import { JwtPayload, AuthenticatedRequest } from '../types/user';
 
 // Estender a interface Request para incluir o usuário autenticado
 declare global {
   namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        username: string;
-        email: string;
-      };
-    }
+    interface Request extends AuthenticatedRequest {}
   }
 }
 
@@ -43,11 +38,12 @@ export const authMiddleware = async (
     }
 
     // Verificar e decodificar o token
-    const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as {
-      id: string;
-      username: string;
-      email: string;
-    };
+    const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
+    
+    // Debug logs
+    console.log('Token decodificado:', decodedToken);
+    console.log('ID no token:', decodedToken.id);
+    console.log('Tipo do ID:', typeof decodedToken.id);
 
     // Verificar se o usuário existe no banco de dados
     const user = await prisma.user.findUnique({

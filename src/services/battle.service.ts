@@ -1,10 +1,17 @@
-import { PrismaClient } from '@prisma/client';
-import { prisma } from '../index';
+import { PrismaClient, Battle, BattleParticipant } from '@prisma/client';
+import { BattleRepository } from '../repositories/battle.repository';
+import { UserRepository } from '../repositories/user.repository';
+import { prisma } from '../database/prisma';
+
+// Instâncias dos repositórios
+const battleRepository = new BattleRepository();
+const userRepository = new UserRepository();
 
 /**
  * Busca todas as batalhas de um usuário
  */
 export const findUserBattles = async (userId: string) => {
+  // Usando o prisma diretamente pois os repositórios podem não ter exatamente os métodos necessários
   return await prisma.battle.findMany({
     where: {
       participants: {
@@ -52,45 +59,7 @@ export const findUserBattles = async (userId: string) => {
  * Busca uma batalha específica pelo ID
  */
 export const findBattleById = async (battleId: string, userId: string) => {
-  return await prisma.battle.findFirst({
-    where: {
-      id: battleId,
-      participants: {
-        some: {
-          participantType: 'user',
-          userId: userId
-        }
-      }
-    },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              username: true,
-              profileImageUrl: true,
-              primaryElementalType: true,
-              level: true
-            }
-          },
-          enemy: {
-            select: {
-              id: true,
-              name: true,
-              imageUrl: true,
-              elementalType: true,
-              rarity: true,
-              isBoss: true
-            }
-          },
-          statusEffects: true,
-          buffs: true,
-          debuffs: true
-        }
-      }
-    }
-  });
+  return await battleRepository.findBattleWithDetails(battleId);
 };
 
 /**
@@ -127,7 +96,7 @@ export const createRandomBattle = async (userId: string, difficulty: 'easy' | 'n
     rarityFilter = ['common', 'uncommon', 'rare'];
   }
 
-  // Busca inimigos aleatórios
+  // Busca inimigos aleatórios usando o Prisma diretamente
   let randomEnemies = await prisma.enemy.findMany({
     where: {
       rarity: { in: rarityFilter },
@@ -172,89 +141,55 @@ export const createRandomBattle = async (userId: string, difficulty: 'easy' | 'n
     throw new Error('Não foi possível encontrar inimigos para a batalha');
   }
 
-  // Cria uma nova batalha e adiciona os participantes em uma transação
-  const battle = await prisma.$transaction(async (tx) => {
-    // Cria a batalha
-    const newBattle = await tx.battle.create({
-      data: {
-        currentTurn: 0,
-        isFinished: false
-      }
-    });
+  // Prepara os dados da batalha
+  const battleData = {
+    currentTurn: 0,
+    isFinished: false,
+    winnerId: null
+  };
 
-    // Garantindo que user.attributes existe (já verificado acima)
-    const attributes = user.attributes!;
+  // Prepara os participantes da batalha
+  const participants: any[] = [];
 
-    // Adiciona o usuário como participante
-    await tx.battleParticipant.create({
-      data: {
-        battleId: newBattle.id,
-        participantType: 'user',
-        userId: user.id,
-        teamId: 'player',
-        position: 1,
-        currentHealth: attributes.health,
-        currentPhysicalAttack: attributes.physicalAttack,
-        currentSpecialAttack: attributes.specialAttack,
-        currentPhysicalDefense: attributes.physicalDefense,
-        currentSpecialDefense: attributes.specialDefense,
-        currentSpeed: attributes.speed
-      }
-    });
-
-    // Adiciona os inimigos como participantes
-    for (let i = 0; i < randomEnemies.length; i++) {
-      const enemy = randomEnemies[i];
-      await tx.battleParticipant.create({
-        data: {
-          battleId: newBattle.id,
-          participantType: 'enemy',
-          enemyId: enemy.id,
-          teamId: 'enemy',
-          position: i + 1,
-          currentHealth: enemy.health,
-          currentPhysicalAttack: enemy.physicalAttack,
-          currentSpecialAttack: enemy.specialAttack,
-          currentPhysicalDefense: enemy.physicalDefense,
-          currentSpecialDefense: enemy.specialDefense,
-          currentSpeed: enemy.speed
-        }
-      });
-    }
-
-    return newBattle;
+  // Adiciona o usuário como participante
+  const attributes = user.attributes!;
+  participants.push({
+    participantType: 'user',
+    userId: user.id,
+    enemyId: null,
+    teamId: 'player',
+    position: 1,
+    currentHealth: attributes.health,
+    currentPhysicalAttack: attributes.physicalAttack,
+    currentSpecialAttack: attributes.specialAttack,
+    currentPhysicalDefense: attributes.physicalDefense,
+    currentSpecialDefense: attributes.specialDefense,
+    currentSpeed: attributes.speed
   });
 
-  // Carrega a batalha completa com todos os participantes
-  return await prisma.battle.findUnique({
-    where: { id: battle.id },
-    include: {
-      participants: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              username: true,
-              profileImageUrl: true,
-              primaryElementalType: true,
-              level: true
-            }
-          },
-          enemy: {
-            select: {
-              id: true,
-              name: true,
-              imageUrl: true,
-              elementalType: true,
-              rarity: true,
-              isBoss: true
-            }
-          },
-          statusEffects: true,
-          buffs: true,
-          debuffs: true
-        }
-      }
-    }
+  // Adiciona os inimigos como participantes
+  randomEnemies.forEach((enemy, index) => {
+    participants.push({
+      participantType: 'enemy',
+      userId: null,
+      enemyId: enemy.id,
+      teamId: 'enemy',
+      position: index + 1,
+      currentHealth: enemy.health,
+      currentPhysicalAttack: enemy.physicalAttack,
+      currentSpecialAttack: enemy.specialAttack,
+      currentPhysicalDefense: enemy.physicalDefense,
+      currentSpecialDefense: enemy.specialDefense,
+      currentSpeed: enemy.speed
+    });
   });
+
+  // Cria a batalha com os participantes usando o repositório
+  const battle = await battleRepository.createBattleWithParticipants(
+    battleData,
+    participants
+  );
+
+  // Retorna a batalha criada
+  return findBattleById(battle.id, userId);
 }; 
