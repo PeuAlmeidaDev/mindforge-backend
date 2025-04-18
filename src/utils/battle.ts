@@ -33,6 +33,23 @@ export const BattleUtils = {
    * @returns Verdadeiro se o atacante tem vantagem
    */
   hasTypeAdvantage(attackerType: ElementalType, defenderType: ElementalType): boolean {
+    // Se o tipo da skill for igual ao tipo do defensor, é desvantagem (no estilo Pokémon)
+    if (attackerType === defenderType) {
+      return false;
+    }
+    
+    // Verificar imunidades - usando objetos parciais já que não definimos imunidades para todos os tipos
+    const immunities: Partial<Record<ElementalType, ElementalType[]>> = {
+      [ElementalType.EARTH]: [ElementalType.ELECTRIC],
+      [ElementalType.GHOST]: [ElementalType.PSYCHIC], // Ghost é imune a Fighting, mas não temos essa constante
+      [ElementalType.DARK]: [ElementalType.PSYCHIC],
+      [ElementalType.FLYING]: [ElementalType.EARTH]
+    };
+    
+    if (defenderType in immunities && immunities[defenderType]?.includes(attackerType)) {
+      return false; // O defensor é imune ao tipo do atacante
+    }
+    
     return ELEMENTAL_ADVANTAGES[attackerType]?.includes(defenderType) || false;
   },
 
@@ -69,16 +86,33 @@ export const BattleUtils = {
   ): number {
     let damage = this.calculateBaseDamage(power, attackValue, defenseValue);
     
-    // Bônus de afinidade (mesmo tipo)
+    // Bônus de afinidade (mesmo tipo do atacante = bônus)
     if (skillType === attackerType) {
-      damage *= 1.5;
+      damage *= 1.5; // STAB - Same Type Attack Bonus (como em Pokémon)
     }
     
-    // Vantagem/desvantagem de tipo
-    if (this.hasTypeAdvantage(skillType, defenderType)) {
-      damage *= 1.5;
-    } else if (this.hasTypeAdvantage(defenderType, skillType)) {
-      damage *= 0.5;
+    // Penalidade para mesmo tipo (atacante = defensor)
+    if (skillType === defenderType) {
+      damage *= 0.5; // Menos efetivo contra mesmo tipo
+    } else {
+      // Vantagem/desvantagem de tipo
+      if (this.hasTypeAdvantage(skillType, defenderType)) {
+        damage *= 2.0; // Super efetivo (como em Pokémon)
+      } else if (this.hasTypeAdvantage(defenderType, skillType)) {
+        damage *= 0.5; // Não muito efetivo
+      }
+      
+      // Verificar imunidades
+      const immunities: Partial<Record<ElementalType, ElementalType[]>> = {
+        [ElementalType.EARTH]: [ElementalType.ELECTRIC],
+        [ElementalType.GHOST]: [ElementalType.PSYCHIC], 
+        [ElementalType.DARK]: [ElementalType.PSYCHIC],
+        [ElementalType.FLYING]: [ElementalType.EARTH]
+      };
+      
+      if (defenderType in immunities && immunities[defenderType]?.includes(skillType)) {
+        return 0; // Imune ao dano
+      }
     }
     
     // Arredondar e garantir que seja no mínimo 1

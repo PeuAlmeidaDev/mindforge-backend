@@ -1,15 +1,8 @@
 import { User, Prisma } from '@prisma/client';
 import { BaseRepository } from './base.repository';
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-
-/**
- * Interface para resultado de autenticação
- */
-export interface AuthResult {
-  user: Omit<User, 'password'>;
-  token: string;
-}
+import { JwtUtils } from '../utils/jwt.utils';
+import { UserResponse, AuthResponse } from '../types/auth';
 
 /**
  * Repositório para operações de autenticação
@@ -116,7 +109,7 @@ export class AuthRepository extends BaseRepository<User> {
    * @param password Senha do usuário
    * @returns Resultado da autenticação ou null se falhar
    */
-  async login(email: string, password: string): Promise<AuthResult | null> {
+  async login(email: string, password: string): Promise<AuthResponse | null> {
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
@@ -135,17 +128,17 @@ export class AuthRepository extends BaseRepository<User> {
     }
 
     // Gerar token JWT
-    const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email },
-      process.env.JWT_SECRET || 'mindforge-secret',
-      { expiresIn: '7d' }
-    );
+    const token = JwtUtils.generateToken({
+      id: user.id,
+      username: user.username,
+      email: user.email
+    });
 
     // Remover a senha do objeto do usuário antes de retornar
     const { password: _, ...userWithoutPassword } = user;
 
     return {
-      user: userWithoutPassword,
+      user: userWithoutPassword as UserResponse,
       token
     };
   }

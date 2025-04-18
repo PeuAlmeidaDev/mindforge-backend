@@ -65,7 +65,11 @@ export const findBattleById = async (battleId: string, userId: string) => {
 /**
  * Cria uma nova batalha aleatória
  */
-export const createRandomBattle = async (userId: string, difficulty: 'easy' | 'normal' | 'hard' = 'normal') => {
+export const createRandomBattle = async (
+  userId: string, 
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal',
+  aiDifficulty?: number
+) => {
   // Carrega o usuário com seus atributos e skills equipadas
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -95,6 +99,11 @@ export const createRandomBattle = async (userId: string, difficulty: 'easy' | 'n
   } else if (difficulty === 'hard') {
     rarityFilter = ['common', 'uncommon', 'rare'];
   }
+
+  // Armazena a dificuldade da IA nos metadados da batalha
+  const metadata = {
+    aiDifficulty: aiDifficulty || (difficulty === 'easy' ? 1 : difficulty === 'normal' ? 3 : 5)
+  };
 
   // Busca inimigos aleatórios usando o Prisma diretamente
   let randomEnemies = await prisma.enemy.findMany({
@@ -145,7 +154,8 @@ export const createRandomBattle = async (userId: string, difficulty: 'easy' | 'n
   const battleData = {
     currentTurn: 0,
     isFinished: false,
-    winnerId: null
+    winnerId: null,
+    metadata: JSON.stringify(metadata) // Armazena metadados como JSON
   };
 
   // Prepara os participantes da batalha

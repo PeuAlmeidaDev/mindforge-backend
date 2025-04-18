@@ -3,6 +3,7 @@ import { prisma } from '../../database/prisma';
 import { BattleAction, BattleActionResult, BattleTurnResult } from '../../types/battle';
 import * as damageService from './damage.service';
 import * as effectsService from './effects.service';
+import * as enemyAiService from './enemy-ai.service';
 
 /**
  * Ordena os participantes da batalha por velocidade
@@ -38,19 +39,41 @@ export const executeBattleTurn = async (
     const statusEffectResults = await effectsService.processStatusEffects(battle.participants);
     const buffResults = await effectsService.processBuffs(battle.participants);
 
+    // Gerar ações para inimigos automaticamente, se não estiverem nas ações fornecidas
+    const completeActions = await completeEnemyActions(battleId, battle.participants, actions);
+
     // Ordena os participantes por velocidade
     const orderedParticipants = orderParticipantsBySpeed(battle.participants);
 
     // Fase 2: Processa cada ação na ordem de velocidade dos participantes
     for (const participant of orderedParticipants) {
+      // Verifica se o participante ainda está ativo
+      if (participant.currentHealth <= 0) {
+        continue; // Participante já está derrotado, não pode agir
+      }
+
       // Verifica se este participante tem uma ação para executar
-      const action = actions.find(action => action.actorId === participant.id);
+      const action = completeActions.find(action => action.actorId === participant.id);
       
       if (!action) continue;
 
       // Verifica se o alvo existe
       const target = battle.participants.find(p => p.id === action.targetId);
       if (!target) continue;
+
+      // Verifica se o alvo já foi derrotado
+      if (target.currentHealth <= 0) {
+        actionResults[participant.id] = {
+          damage: 0,
+          isCritical: false,
+          accuracy: false,
+          statusEffects: [],
+          buffs: [],
+          debuffs: [],
+          messages: [`${effectsService.getParticipantName(target)} já foi derrotado`]
+        };
+        continue;
+      }
 
       // Verifica se o participante está impedido de agir por algum efeito de status
       const isStunned = statusEffectResults[participant.id]?.stunned;
@@ -87,9 +110,38 @@ export const executeBattleTurn = async (
         continue;
       }
 
+      // NOVA VALIDAÇÃO: Verifica se a skill está equipada (apenas para participantes do tipo 'user')
+      if (participant.participantType === 'user' && participant.userId) {
+        // Verifica se a skill está equipada pelo usuário
+        const userSkill = await prisma.userSkill.findFirst({
+          where: {
+            userId: participant.userId,
+            skillId: skill.id,
+            equipped: true
+          }
+        });
+
+        if (!userSkill) {
+          // A skill não está equipada, não pode ser usada
+          actionResults[participant.id] = {
+            damage: 0,
+            isCritical: false,
+            accuracy: false,
+            statusEffects: [],
+            buffs: [],
+            debuffs: [],
+            messages: ['Esta habilidade não está equipada e não pode ser usada']
+          };
+          continue;
+        }
+      }
+
       // Obtém os tipos elementais
       const attackerType = await getParticipantElementalType(participant);
       const defenderType = await getParticipantElementalType(target);
+
+      // Log para debug dos tipos elementais
+      console.log(`Batalha: ${battleId} - Atacante: ${participant.id} (${attackerType}) - Defensor: ${target.id} (${defenderType}) - Skill: ${skill.id} (${skill.elementalType})`);
 
       // Calcula o resultado da ação
       const result = damageService.calculateDamage(
@@ -99,6 +151,9 @@ export const executeBattleTurn = async (
         attackerType,
         defenderType
       );
+      
+      // Log para debug do resultado
+      console.log(`Resultado - Dano: ${result.damage}, Crítico: ${result.isCritical}, Mensagens: ${result.messages.join(', ')}`);
       
       actionResults[participant.id] = result;
 
@@ -114,9 +169,116 @@ export const executeBattleTurn = async (
           }
         });
 
-        // Adiciona uma mensagem de resultado
-        if (!result.messages) result.messages = [];
-        result.messages.push(`${effectsService.getParticipantName(participant)} causou ${result.damage} de dano${result.isCritical ? ' crítico' : ''} a ${effectsService.getParticipantName(target)}`);
+        // Busca o participante atualizado após aplicar o dano
+        const updatedTarget = await prisma.battleParticipant.findUnique({
+          where: { id: target.id }
+        });
+
+        // Verifica se o dano foi crítico ou teve vantagem de tipo para mostrar na mensagem
+        if (result.messages.length === 0) {
+          result.messages.push(`${effectsService.getParticipantName(participant)} causou ${result.damage} de dano a ${effectsService.getParticipantName(target)}`);
+        } else {
+          // A mensagem de dano será adicionada no final das mensagens existentes (vantagens de tipo, crítico, etc)
+          result.messages.push(`${effectsService.getParticipantName(participant)} causou ${result.damage} de dano a ${effectsService.getParticipantName(target)}`);
+        }
+
+        // Verifica se o alvo foi derrotado pelo ataque
+        if (updatedTarget && updatedTarget.currentHealth <= 0) {
+          result.messages.push(`${effectsService.getParticipantName(target)} foi derrotado!`);
+          
+          // Verifica imediatamente se a batalha foi encerrada
+          const currentParticipants = await prisma.battleParticipant.findMany({
+            where: { battleId }
+          });
+          
+          // Verifica o time do alvo derrotado
+          const defeatedTeam = target.teamId;
+          
+          // Se o time do alvo derrotado for 'enemy', verificamos se todos os inimigos foram derrotados
+          if (defeatedTeam === 'enemy') {
+            const allEnemiesDefeated = currentParticipants
+              .filter(p => p.teamId === 'enemy')
+              .every(p => p.currentHealth <= 0);
+              
+            if (allEnemiesDefeated) {
+              // Finaliza a batalha com vitória do jogador
+              await prisma.battle.update({
+                where: { id: battleId },
+                data: {
+                  isFinished: true,
+                  currentTurn: {
+                    increment: 1
+                  }
+                }
+              });
+              
+              // Busca a batalha atualizada
+              const finalBattle = await prisma.battle.findUnique({
+                where: { id: battleId },
+                include: {
+                  participants: true
+                }
+              });
+              
+              if (!finalBattle) {
+                throw new Error('Erro ao atualizar batalha');
+              }
+              
+              // Retorna o resultado do turno imediatamente
+              return {
+                battle: finalBattle,
+                participants: finalBattle.participants,
+                turnNumber: finalBattle.currentTurn,
+                playerActions: separateActionsByTeam(actionResults, finalBattle.participants, 'player'),
+                enemyActions: separateActionsByTeam(actionResults, finalBattle.participants, 'enemy'),
+                actionResults,
+                isFinished: true,
+                winnerTeam: 'player'
+              };
+            }
+          } else if (defeatedTeam === 'player') {
+            const allPlayersDefeated = currentParticipants
+              .filter(p => p.teamId === 'player')
+              .every(p => p.currentHealth <= 0);
+              
+            if (allPlayersDefeated) {
+              // Finaliza a batalha com vitória do inimigo
+              await prisma.battle.update({
+                where: { id: battleId },
+                data: {
+                  isFinished: true,
+                  currentTurn: {
+                    increment: 1
+                  }
+                }
+              });
+              
+              // Busca a batalha atualizada
+              const finalBattle = await prisma.battle.findUnique({
+                where: { id: battleId },
+                include: {
+                  participants: true
+                }
+              });
+              
+              if (!finalBattle) {
+                throw new Error('Erro ao atualizar batalha');
+              }
+              
+              // Retorna o resultado do turno imediatamente
+              return {
+                battle: finalBattle,
+                participants: finalBattle.participants,
+                turnNumber: finalBattle.currentTurn,
+                playerActions: separateActionsByTeam(actionResults, finalBattle.participants, 'player'),
+                enemyActions: separateActionsByTeam(actionResults, finalBattle.participants, 'enemy'),
+                actionResults,
+                isFinished: true,
+                winnerTeam: 'enemy'
+              };
+            }
+          }
+        }
 
         // Aplica efeitos de status
         for (const effect of result.statusEffects) {
@@ -149,8 +311,9 @@ export const executeBattleTurn = async (
         }
       } else {
         // Adiciona mensagem de erro
-        if (!result.messages) result.messages = [];
-        result.messages.push(`${effectsService.getParticipantName(participant)} errou o ataque`);
+        if (result.messages.length === 0) {
+          result.messages.push(`${effectsService.getParticipantName(participant)} errou o ataque`);
+        }
       }
     }
 
@@ -203,20 +366,81 @@ export const executeBattleTurn = async (
     });
 
     if (!updatedBattle) {
-      throw new Error('Não foi possível obter a batalha atualizada após processamento do turno');
+      throw new Error('Erro ao atualizar batalha');
     }
 
+    // Retorna o resultado do turno
     return {
       battle: updatedBattle,
-      participants: updatedParticipants,
+      participants: updatedBattle.participants,
+      turnNumber: updatedBattle.currentTurn,
+      playerActions: separateActionsByTeam(actionResults, updatedBattle.participants, 'player'),
+      enemyActions: separateActionsByTeam(actionResults, updatedBattle.participants, 'enemy'),
       actionResults,
       isFinished,
       winnerTeam
     };
   } catch (error) {
-    console.error('Erro ao executar turno da batalha:', error);
-    throw new Error(`Erro ao executar turno da batalha: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+    console.error('Erro ao executar turno de batalha:', error);
+    throw error;
   }
+};
+
+/**
+ * Completa as ações da batalha com ações automáticas para inimigos
+ */
+const completeEnemyActions = async (
+  battleId: string,
+  participants: BattleParticipant[],
+  playerActions: BattleAction[]
+): Promise<BattleAction[]> => {
+  // Copiar as ações do jogador
+  const completeActions = [...playerActions];
+  
+  // Identificar os inimigos que estão na batalha e estão vivos
+  const enemies = participants.filter(
+    p => p.teamId === 'enemy' && p.currentHealth > 0 && p.participantType === 'enemy'
+  );
+  
+  // Verificar quais inimigos já têm ações definidas
+  const enemiesWithActions = new Set(playerActions
+    .filter(action => {
+      const actor = participants.find(p => p.id === action.actorId);
+      return actor && actor.participantType === 'enemy';
+    })
+    .map(action => action.actorId)
+  );
+  
+  // Para cada inimigo sem ação definida, gerar uma ação usando a IA
+  for (const enemy of enemies) {
+    if (!enemiesWithActions.has(enemy.id)) {
+      try {
+        // Determinar o nível de dificuldade para este inimigo
+        let difficultyLevel = 3; // Padrão
+        
+        if (enemy.userId) {
+          difficultyLevel = await enemyAiService.determineDifficultyLevel(
+            enemy.enemyId!, 
+            enemy.userId
+          );
+        }
+        
+        // Gerar ação para o inimigo usando a IA
+        const enemyAction = await enemyAiService.generateEnemyAction(
+          battleId,
+          enemy,
+          difficultyLevel
+        );
+        
+        // Adicionar a ação à lista completa
+        completeActions.push(enemyAction);
+      } catch (error) {
+        console.error(`Erro ao gerar ação para inimigo ${enemy.id}:`, error);
+      }
+    }
+  }
+  
+  return completeActions;
 };
 
 /**
@@ -246,23 +470,54 @@ export const checkTeamStatus = (participants: BattleParticipant[]): {
 export const getParticipantElementalType = async (
   participant: BattleParticipant
 ): Promise<string> => {
-  if (participant.participantType === 'user' && participant.userId) {
-    const user = await prisma.user.findUnique({
-      where: { id: participant.userId },
-      select: { primaryElementalType: true }
-    });
+  try {
+    let elementalType = 'normal'; // Tipo padrão
+
+    if (participant.participantType === 'user' && participant.userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: participant.userId }
+      });
+      if (user?.primaryElementalType) {
+        elementalType = user.primaryElementalType;
+      }
+    } else if (participant.participantType === 'enemy' && participant.enemyId) {
+      const enemy = await prisma.enemy.findUnique({
+        where: { id: participant.enemyId }
+      });
+      if (enemy?.elementalType) {
+        elementalType = enemy.elementalType;
+      }
+    }
     
-    return user?.primaryElementalType || 'fire';
-  } 
+    // Garantir que o tipo é sempre minúsculo para evitar inconsistências
+    return elementalType.toLowerCase();
+  } catch (error) {
+    console.error(`Erro ao obter tipo elemental: ${error}`);
+    return 'normal';
+  }
+};
+
+/**
+ * Separa os resultados das ações por time
+ */
+const separateActionsByTeam = (
+  actionResults: Record<string, BattleActionResult>,
+  participants: BattleParticipant[],
+  teamId: string
+): Record<string, BattleActionResult> => {
+  const teamResults: Record<string, BattleActionResult> = {};
   
-  if (participant.participantType === 'enemy' && participant.enemyId) {
-    const enemy = await prisma.enemy.findUnique({
-      where: { id: participant.enemyId },
-      select: { elementalType: true }
-    });
-    
-    return enemy?.elementalType || 'fire';
+  // Obter os IDs dos participantes do time especificado
+  const teamParticipantIds = participants
+    .filter(p => p.teamId === teamId)
+    .map(p => p.id);
+  
+  // Filtrar apenas as ações realizadas pelos participantes do time
+  for (const [participantId, result] of Object.entries(actionResults)) {
+    if (teamParticipantIds.includes(participantId)) {
+      teamResults[participantId] = result;
+    }
   }
   
-  return 'fire'; // Tipo padrão
+  return teamResults;
 }; 

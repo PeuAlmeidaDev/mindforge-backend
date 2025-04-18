@@ -37,11 +37,12 @@ export const startRandomBattle = async (req: Request, res: Response) => {
     }
 
     const userId = req.user.id;
-    const { difficulty = 'normal' } = req.body;
+    const { difficulty = 'normal', aiDifficulty } = req.body;
 
     const battle = await battleService.createRandomBattle(
       userId, 
-      difficulty as 'easy' | 'normal' | 'hard'
+      difficulty as 'easy' | 'normal' | 'hard',
+      aiDifficulty ? parseInt(aiDifficulty) : undefined
     );
 
     return ResponseBuilder.success(res, battle, 'Batalha iniciada com sucesso', 201);
@@ -127,6 +128,21 @@ export const processTurnAction = async (req: Request, res: Response) => {
       }
     }
     
+    // Separa as ações dos jogadores e dos inimigos para melhor visualização no frontend
+    const playerActions = Object.fromEntries(
+      Object.entries(turnResult.actionResults).filter(([actorId]) => {
+        const participant = turnResult.participants.find(p => p.id === actorId);
+        return participant && participant.participantType === 'user';
+      })
+    );
+    
+    const enemyActions = Object.fromEntries(
+      Object.entries(turnResult.actionResults).filter(([actorId]) => {
+        const participant = turnResult.participants.find(p => p.id === actorId);
+        return participant && participant.participantType === 'enemy';
+      })
+    );
+    
     // Preparar a resposta para o frontend
     return ResponseBuilder.success(
       res, 
@@ -134,7 +150,8 @@ export const processTurnAction = async (req: Request, res: Response) => {
         turnNumber: battle.currentTurn + 1,
         isFinished: turnResult.isFinished,
         winnerTeam: turnResult.winnerTeam,
-        actions: turnResult.actionResults,
+        playerActions: playerActions,
+        enemyActions: enemyActions,
         participants: turnResult.participants,
         battle: turnResult.battle,
         rewards: rewards // Incluindo as recompensas na resposta, se houver

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import { prisma } from '../database/prisma';
+import { JwtUtils } from '../utils/jwt.utils';
 import { JwtPayload, AuthenticatedRequest } from '../types/user';
 
 // Estender a interface Request para incluir o usuário autenticado
@@ -37,14 +37,9 @@ export const authMiddleware = async (
       });
     }
 
-    // Verificar e decodificar o token
-    const decodedToken = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
+    // Verificar e decodificar o token usando o utilitário
+    const decodedToken = JwtUtils.verifyToken(token);
     
-    // Debug logs
-    console.log('Token decodificado:', decodedToken);
-    console.log('ID no token:', decodedToken.id);
-    console.log('Tipo do ID:', typeof decodedToken.id);
-
     // Verificar se o usuário existe no banco de dados
     const user = await prisma.user.findUnique({
       where: { id: decodedToken.id }
@@ -66,17 +61,10 @@ export const authMiddleware = async (
 
     return next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Token inválido ou expirado' 
-      });
-    }
-
-    console.error('Erro no middleware de autenticação:', error);
-    return res.status(500).json({ 
+    // Tratamento de erro simplificado
+    return res.status(401).json({ 
       success: false, 
-      message: 'Erro interno no servidor' 
+      message: 'Token inválido ou expirado' 
     });
   }
 }; 

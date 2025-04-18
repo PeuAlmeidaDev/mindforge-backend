@@ -127,22 +127,47 @@ export class UserRepository extends BaseRepository<User> {
    */
   async manageEquippedSkills(userId: string, equippedSkills: string[]): Promise<any[]> {
     return this.transaction(async (tx) => {
-      // Primeiro desativar todas as habilidades
-      await tx.userSkill.updateMany({
-        where: { userId },
-        data: { equipped: false }
-      });
-
-      // Depois ativar apenas as selecionadas
-      await tx.userSkill.updateMany({
-        where: {
+      // Verificar quantas skills já estão equipadas
+      const currentEquipped = await tx.userSkill.findMany({
+        where: { 
           userId,
-          skillId: {
-            in: equippedSkills
-          }
+          equipped: true
         },
-        data: { equipped: true }
+        select: { skillId: true }
       });
+      
+      // Obter os IDs das skills atualmente equipadas
+      const currentEquippedIds = currentEquipped.map(item => item.skillId);
+      
+      // Calcular quais skills precisam ser ativadas e quais precisam ser desativadas
+      const toActivate = equippedSkills.filter(id => !currentEquippedIds.includes(id));
+      const toDeactivate = currentEquippedIds.filter(id => !equippedSkills.includes(id));
+      
+      // Desativar skills que não estão mais na lista
+      if (toDeactivate.length > 0) {
+        await tx.userSkill.updateMany({
+          where: {
+            userId,
+            skillId: {
+              in: toDeactivate
+            }
+          },
+          data: { equipped: false }
+        });
+      }
+      
+      // Ativar novas skills na lista de forma individual
+      for (const skillId of toActivate) {
+        await tx.userSkill.update({
+          where: {
+            userId_skillId: {
+              userId,
+              skillId
+            }
+          },
+          data: { equipped: true }
+        });
+      }
 
       // Retornar as habilidades equipadas atualizadas
       return tx.userSkill.findMany({

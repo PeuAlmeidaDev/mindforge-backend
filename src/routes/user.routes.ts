@@ -16,7 +16,7 @@ const attributesUpdateSchema = z.object({
 });
 
 const skillsUpdateSchema = z.object({
-  equippedSkills: z.array(uuidSchema).max(5)
+  equippedSkills: z.array(uuidSchema).max(4)
 });
 
 /**

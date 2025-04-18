@@ -39,6 +39,7 @@ model User {
   dailyGoals               UserDailyGoal[]
   userSkills               UserSkill[]
   battleParticipant        BattleParticipant[]
+  battleRewards            BattleReward[]
 }
 
 // Atributos do Usuário
@@ -216,15 +217,16 @@ model EnemySkill {
 
 // Estado de uma Batalha
 model Battle {
-  id               String    @id @default(uuid())
-  currentTurn      Int       @default(1)
-  isFinished       Boolean   @default(false)
-  winnerId         String?
-  startedAt        DateTime  @default(now())
-  endedAt          DateTime?
-  
+  id           String              @id @default(cuid())
+  currentTurn  Int                 @default(0)
+  isFinished   Boolean             @default(false)
+  winnerId     String?             // ID do time ou participante vencedor
+  startedAt    DateTime            @default(now())
+  endedAt      DateTime?
+  metadata     String?              // Metadados da batalha em formato JSON
   // Relacionamentos
-  participants     BattleParticipant[]
+  participants BattleParticipant[]
+  rewards      BattleReward[]
 }
 
 // Participante da Batalha (Usuário ou Inimigo)
@@ -308,9 +310,9 @@ model BattleReward {
   attributePointsGained Int     @default(0)
   rewardedAt          DateTime  @default(now())
   
-  // Relacionamentos - opcional, se quiser acessar direto do modelo
-  // user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // battle              Battle   @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  // Relacionamentos
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  battle              Battle   @relation(fields: [battleId], references: [id], onDelete: Cascade)
   
   // Garantir que cada usuário só receba recompensa uma vez por batalha
   @@unique([userId, battleId])

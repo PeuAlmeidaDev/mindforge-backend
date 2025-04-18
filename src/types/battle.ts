@@ -41,7 +41,7 @@ export interface BattleActionResult {
   statusEffects: StatusEffectData[];
   buffs: BuffData[];
   debuffs: BuffData[];
-  messages?: string[];
+  messages: string[];
 }
 
 /**
@@ -50,6 +50,9 @@ export interface BattleActionResult {
 export interface BattleTurnResult {
   battle: Battle;
   participants: BattleParticipant[];
+  turnNumber?: number;
+  playerActions?: Record<string, BattleActionResult>;
+  enemyActions?: Record<string, BattleActionResult>;
   actionResults: Record<string, BattleActionResult>;
   isFinished: boolean;
   winnerTeam: string | null;

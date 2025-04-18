@@ -81,6 +81,7 @@ export const processBattleRewards = async (
         userId?: string;
         teamId: string;
         currentHealth: number;
+        participantType: string;
         enemy?: any;
       }> 
     };
@@ -92,12 +93,89 @@ export const processBattleRewards = async (
       throw new Error('Batalha não finalizada');
     }
 
-    // Verificar se o usuário participou da batalha
+    // Verificar se o usuário participou da batalha - modificando para ser mais flexível
+    // Primeiro verificamos se tem um participante exato com userId
     const userParticipant = battleWithParticipants.participants.find(p => p.userId === userId);
     
+    // Se não encontrou como participante direto, verificamos se o usuário é do tipo 'user' e se é o único jogador humano
     if (!userParticipant) {
-      console.error(`Usuário ${userId} não encontrado entre os participantes da batalha`);
-      throw new Error('Usuário não participou desta batalha');
+      const humanParticipants = battleWithParticipants.participants.filter(p => p.participantType === 'user');
+      console.log(`Participantes humanos na batalha: ${humanParticipants.length}`);
+      
+      // Se há apenas um jogador humano, consideramos que este jogador é o usuário atual
+      if (humanParticipants.length === 1) {
+        console.log(`Assumindo que o único jogador humano é o usuário atual ${userId}`);
+        // Usamos o primeiro (e único) participante humano como o participante do usuário
+        const playerTeam = humanParticipants[0].teamId;
+        
+        // Verifica se todos os inimigos foram derrotados (vida <= 0)
+        const playerTeamWon = battleWithParticipants.participants.every(p => 
+          p.teamId === playerTeam || p.currentHealth <= 0
+        );
+        
+        // Se o jogador não venceu, não dá recompensa
+        if (!playerTeamWon) {
+          throw new Error('Você não pode receber recompensas por uma batalha que não venceu');
+        }
+        
+        // Busca o usuário e suas informações atuais
+        const user = await battleRewardsRepository.findUserWithExperience(userId);
+
+        if (!user) {
+          throw new Error('Usuário não encontrado');
+        }
+
+        // Extrai níveis dos inimigos (assumindo que eles possuem um nível baseado em seus atributos)
+        const enemyLevels = battleWithParticipants.participants
+          .filter(p => p.teamId !== playerTeam && p.enemy)
+          .map(p => Math.max(1, Math.floor((
+            p.enemy!.physicalAttack + 
+            p.enemy!.specialAttack + 
+            p.enemy!.physicalDefense + 
+            p.enemy!.specialDefense + 
+            p.enemy!.speed) / 20))); // Uma estimativa de nível baseada nos atributos
+        
+        // Define a dificuldade com base no número de inimigos
+        const difficulty = enemyLevels.length <= 1 ? 'easy' : 
+                          enemyLevels.length <= 2 ? 'normal' : 'hard';
+                          
+        // Calcula a experiência ganha
+        const experienceGained = battleRewardsRepository.calculateBattleExperience(enemyLevels, difficulty);
+        
+        // Verifica se o usuário subiu de nível
+        const { newLevel, leveledUp, newAttributePoints, newExp } = battleRewardsRepository.checkLevelUp(
+          user.level,
+          user.experience,
+          experienceGained
+        );
+        
+        // Atualiza o usuário com a experiência ganha e possível novo nível
+        await battleRewardsRepository.updateUserExperience(
+          userId,
+          newLevel,
+          newExp,
+          newAttributePoints
+        );
+        
+        // Registra que o usuário recebeu recompensas por esta batalha
+        await battleRewardsRepository.registerRewardReceived(
+          userId,
+          battleId,
+          experienceGained,
+          leveledUp,
+          newAttributePoints
+        );
+        
+        // Retorna as recompensas processadas
+        return {
+          experience: experienceGained,
+          levelUp: leveledUp,
+          attributePointsGained: newAttributePoints
+        };
+      } else {
+        console.error(`Usuário ${userId} não encontrado entre os participantes da batalha`);
+        throw new Error('Usuário não participou desta batalha');
+      }
     }
 
     // Verifica se o time do jogador foi o vencedor
