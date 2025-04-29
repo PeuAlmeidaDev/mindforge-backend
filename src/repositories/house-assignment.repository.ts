@@ -85,12 +85,40 @@ export class HouseAssignmentRepository extends BaseRepository<Interest> {
    * @returns Mapa de slugs de interesses
    */
   convertInterestsToSlugs(interests: InterestWithName[]): string[] {
-    return interests.map(interest => 
-      interest.name
+    const slugMap: Record<string, string> = {
+      'Saúde e Fitness': 'saude-fitness',
+      'Criatividade e Expressão': 'criatividade-expressao',
+      'Aprendizado e Desenvolvimento Pessoal': 'aprendizado-desenvolvimento',
+      'Sustentabilidade e Lifestyle': 'sustentabilidade-lifestyle',
+      'Estudos Acadêmicos e Desenvolvimento Profissional': 'estudos-academicos-profissional',
+      'Condicionamento Físico': 'condicionamento-fisico',
+      'Artes Marciais': 'artes-marciais',
+      'Autoconhecimento e Mindset': 'autoconhecimento-mindset',
+      'Organização e Produtividade': 'organizacao-produtividade',
+      'Saúde e Bem-estar': 'saude-bem-estar',
+      'Relações e Impacto Social': 'relacoes-impacto-social'
+    };
+
+    const slugs = interests.map(interest => {
+      // Primeiro tentar encontrar no mapa predefinido
+      const predefinedSlug = slugMap[interest.name];
+      if (predefinedSlug) {
+        return predefinedSlug;
+      }
+      
+      // Se não encontrar, gerar slug automaticamente
+      return interest.name
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // Remove acentos
         .replace(/[^a-z0-9]+/g, '-')     // Substitui caracteres não alfanuméricos por hífen
-    );
+        .replace(/-+$/, '')              // Remove hífens no final
+        .replace(/^-+/, '');             // Remove hífens no início
+    });
+    
+    console.log('Interesses convertidos para slugs:', 
+      interests.map(i => i.name).map((name, i) => `${name} -> ${slugs[i]}`));
+    
+    return slugs;
   }
 } 

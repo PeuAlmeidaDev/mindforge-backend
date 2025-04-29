@@ -24,13 +24,77 @@ export const executeBattleTurn = async (
     const battle = await prisma.battle.findUnique({
       where: { id: battleId },
       include: {
-        participants: true
+        participants: {
+          include: {
+            user: {
+              include: {
+                attributes: true
+              }
+            },
+            enemy: true
+          }
+        }
       }
     });
 
     if (!battle) {
       throw new Error('Batalha não encontrada');
     }
+
+    // Logs para debug
+    console.log(`Batalha ID: ${battleId}, Ações recebidas:`, JSON.stringify(actions));
+    console.log(`Participantes da batalha:`, battle.participants.map(p => ({
+      id: p.id,
+      type: p.participantType,
+      teamId: p.teamId,
+      userId: p.userId,
+      enemyId: p.enemyId
+    })));
+    
+    // Verifica se há participantes inválidos nas ações
+    const validatedActions = actions.map(action => {
+      // Verificar se o actorId existe como participante
+      const actor = battle.participants.find(p => p.id === action.actorId);
+      
+      if (!actor) {
+        // Se o ID do ator não for encontrado diretamente, tenta encontrar pelo userId ou enemyId
+        const userActor = battle.participants.find(p => p.userId === action.actorId);
+        const enemyActor = battle.participants.find(p => p.enemyId === action.actorId);
+        
+        if (userActor) {
+          console.log(`Corrigindo actorId de ${action.actorId} para ${userActor.id} (participante do usuário)`);
+          action.actorId = userActor.id;
+        } else if (enemyActor) {
+          console.log(`Corrigindo actorId de ${action.actorId} para ${enemyActor.id} (participante do inimigo)`);
+          action.actorId = enemyActor.id;
+        } else {
+          console.log(`Ator não encontrado: ${action.actorId}`);
+        }
+      }
+      
+      // Verificar se o targetId existe como participante
+      const target = battle.participants.find(p => p.id === action.targetId);
+      
+      if (!target) {
+        // Se o ID do alvo não for encontrado diretamente, tenta encontrar pelo userId ou enemyId
+        const userTarget = battle.participants.find(p => p.userId === action.targetId);
+        const enemyTarget = battle.participants.find(p => p.enemyId === action.targetId);
+        
+        if (userTarget) {
+          console.log(`Corrigindo targetId de ${action.targetId} para ${userTarget.id} (participante do usuário)`);
+          action.targetId = userTarget.id;
+        } else if (enemyTarget) {
+          console.log(`Corrigindo targetId de ${action.targetId} para ${enemyTarget.id} (participante do inimigo)`);
+          action.targetId = enemyTarget.id;
+        } else {
+          console.log(`Alvo não encontrado: ${action.targetId}`);
+        }
+      }
+      
+      return action;
+    });
+    
+    console.log(`Ações validadas:`, JSON.stringify(validatedActions));
 
     // Objeto para armazenar os resultados das ações
     const actionResults: Record<string, BattleActionResult> = {};
@@ -40,7 +104,7 @@ export const executeBattleTurn = async (
     const buffResults = await effectsService.processBuffs(battle.participants);
 
     // Gerar ações para inimigos automaticamente, se não estiverem nas ações fornecidas
-    const completeActions = await completeEnemyActions(battleId, battle.participants, actions);
+    const completeActions = await completeEnemyActions(battleId, battle.participants, validatedActions);
 
     // Ordena os participantes por velocidade
     const orderedParticipants = orderParticipantsBySpeed(battle.participants);
@@ -208,7 +272,8 @@ export const executeBattleTurn = async (
                   isFinished: true,
                   currentTurn: {
                     increment: 1
-                  }
+                  },
+                  winnerId: getWinnerTeamRepresentativeId(currentParticipants, 'player')
                 }
               });
               
@@ -249,7 +314,8 @@ export const executeBattleTurn = async (
                   isFinished: true,
                   currentTurn: {
                     increment: 1
-                  }
+                  },
+                  winnerId: getWinnerTeamRepresentativeId(currentParticipants, 'enemy')
                 }
               });
               
@@ -345,14 +411,15 @@ export const executeBattleTurn = async (
       isFinished = true;
       winnerTeam = teamStatus.playerDefeated ? 'enemy' : 'player';
       
+      // Obtém o ID de um representante do time vencedor
+      const winnerId = getWinnerTeamRepresentativeId(updatedParticipants, winnerTeam);
+      
       // Atualiza o status da batalha
       await prisma.battle.update({
         where: { id: battleId },
         data: {
           isFinished: true,
-          // Usamos winnerId conforme o schema do Prisma
-          // Como não temos o ID específico do vencedor, podemos deixar null ou
-          // usar algum identificador para o time
+          winnerId: winnerId // Define o winnerId como o ID do representante do time vencedor
         }
       });
     }
@@ -520,4 +587,65 @@ const separateActionsByTeam = (
   }
   
   return teamResults;
+};
+
+/**
+ * Obtém o ID de um representante do time vencedor
+ */
+const getWinnerTeamRepresentativeId = (participants: BattleParticipant[], winnerTeam: string): string | null => {
+  // Filtrar os participantes do time vencedor que ainda estão vivos
+  const teamParticipants = participants.filter(
+    p => p.teamId === winnerTeam && p.currentHealth > 0
+  );
+  
+  // Se encontrar algum participante, retorna o ID do primeiro
+  if (teamParticipants.length > 0) {
+    return teamParticipants[0].id;
+  }
+  
+  // Caso não encontre nenhum participante vivo (situação rara), 
+  // retorna o ID do primeiro participante do time independente do estado
+  const anyTeamParticipant = participants.find(p => p.teamId === winnerTeam);
+  return anyTeamParticipant?.id || null;
+};
+
+/**
+ * Obtém dados detalhados dos participantes de uma batalha
+ */
+export const getDetailedParticipants = async (battleId: string): Promise<BattleParticipant[]> => {
+  return await prisma.battleParticipant.findMany({
+    where: { battleId },
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          profileImageUrl: true,
+          primaryElementalType: true,
+          secondaryElementalType: true,
+          level: true,
+          attributes: true
+        }
+      },
+      enemy: {
+        select: {
+          id: true,
+          name: true,
+          imageUrl: true,
+          elementalType: true,
+          rarity: true,
+          isBoss: true,
+          health: true,
+          physicalAttack: true,
+          specialAttack: true,
+          physicalDefense: true,
+          specialDefense: true,
+          speed: true
+        }
+      },
+      statusEffects: true,
+      buffs: true,
+      debuffs: true
+    }
+  });
 }; 

@@ -5,6 +5,11 @@ import * as battleEngineService from '../services/battle-engine.service';
 import * as battleRewardsService from '../services/battle-rewards.service';
 import { BattleStatusEffect } from '@prisma/client';
 import { ResponseBuilder } from '../utils/response';
+import { BattleRepository } from '../repositories/battle.repository';
+import * as turnService from '../services/battle/turn.service';
+
+// Instância do repositório de batalha
+const battleRepository = new BattleRepository();
 
 /**
  * Obtém todas as batalhas do usuário atual
@@ -75,7 +80,16 @@ export const getBattleById = async (req: Request, res: Response) => {
       return ResponseBuilder.error(res, 'Batalha não encontrada', undefined, 404);
     }
 
-    return ResponseBuilder.success(res, battle, 'Batalha obtida com sucesso');
+    // Busca participantes detalhados
+    const detailedParticipants = await turnService.getDetailedParticipants(id);
+
+    // Cria uma cópia da batalha e substitui os participantes pelos detalhados
+    const battleWithDetailedParticipants = {
+      ...battle,
+      participants: detailedParticipants
+    };
+
+    return ResponseBuilder.success(res, battleWithDetailedParticipants, 'Batalha obtida com sucesso');
   } catch (error) {
     console.error('Erro ao obter batalha:', error);
     return ResponseBuilder.error(res, 'Erro ao obter batalha', undefined, 500);
@@ -96,6 +110,8 @@ export const processTurnAction = async (req: Request, res: Response) => {
     }
     
     const userId = req.user.id;
+    console.log(`Processando turno da batalha ${id} para o usuário ${userId}`);
+    console.log(`Ações recebidas:`, JSON.stringify(actions));
     
     // Verificar se a batalha existe e pertence ao usuário
     const battle = await battleService.findBattleById(id, userId);
@@ -114,6 +130,17 @@ export const processTurnAction = async (req: Request, res: Response) => {
       return ResponseBuilder.error(res, 'Ações de turno inválidas');
     }
     
+    // Validação detalhada das ações
+    for (const action of actions) {
+      if (!action.actorId || !action.targetId || !action.skillId) {
+        console.log(`Ação inválida: faltando propriedades obrigatórias`, action);
+        return ResponseBuilder.error(res, 'Ação inválida: actorId, targetId e skillId são obrigatórios');
+      }
+    }
+    
+    // Log das ações antes de enviar para processamento
+    console.log(`Ações validadas e prontas para processamento:`, JSON.stringify(actions));
+    
     // Executar o turno da batalha com o sistema refatorado
     const turnResult = await battleEngineService.executeBattleTurn(id, actions);
     
@@ -127,6 +154,9 @@ export const processTurnAction = async (req: Request, res: Response) => {
         // Se falhar ao processar recompensas, não interrompemos o fluxo
       }
     }
+    
+    // Busca detalhes completos dos participantes para incluir na resposta
+    const detailedParticipants = await turnService.getDetailedParticipants(id);
     
     // Separa as ações dos jogadores e dos inimigos para melhor visualização no frontend
     const playerActions = Object.fromEntries(
@@ -152,7 +182,7 @@ export const processTurnAction = async (req: Request, res: Response) => {
         winnerTeam: turnResult.winnerTeam,
         playerActions: playerActions,
         enemyActions: enemyActions,
-        participants: turnResult.participants,
+        participants: detailedParticipants,
         battle: turnResult.battle,
         rewards: rewards // Incluindo as recompensas na resposta, se houver
       },

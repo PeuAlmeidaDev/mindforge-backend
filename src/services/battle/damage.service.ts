@@ -98,11 +98,18 @@ export const calculateDamage = (
     messages: [] // Inicializamos o array de mensagens
   };
 
-  // Verifica acurácia
-  if (Math.random() * 100 > skill.accuracy) {
+  // Log para debug
+  console.log(`Calculando dano - Skill: ${skill.name}, Precisão: ${skill.accuracy}%`);
+
+  // Verifica acurácia - Skills com 100% de precisão sempre acertam
+  if (skill.accuracy < 100 && Math.random() * 100 > skill.accuracy) {
+    console.log(`Ataque errou! Random roll > ${skill.accuracy}`);
     result.accuracy = false;
+    result.messages.push('O ataque errou!');
     return result;
   }
+
+  console.log(`Ataque acertou! Skill tem ${skill.accuracy}% de precisão.`);
 
   // Determina se é ataque físico ou especial baseado no campo attackType
   const isPhysical = skill.attackType === 'physical';

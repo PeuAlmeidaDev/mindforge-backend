@@ -30,6 +30,7 @@ export const findUserBattles = async (userId: string) => {
               username: true,
               profileImageUrl: true,
               primaryElementalType: true,
+              secondaryElementalType: true,
               level: true
             }
           },
@@ -40,7 +41,13 @@ export const findUserBattles = async (userId: string) => {
               imageUrl: true,
               elementalType: true,
               rarity: true,
-              isBoss: true
+              isBoss: true,
+              health: true,
+              physicalAttack: true,
+              specialAttack: true,
+              physicalDefense: true,
+              specialDefense: true,
+              speed: true
             }
           },
           statusEffects: true,

@@ -43,7 +43,22 @@ export class BattleRepository extends BaseRepository<Battle> {
                 level: true
               }
             },
-            enemy: true,
+            enemy: {
+              select: {
+                id: true,
+                name: true,
+                imageUrl: true,
+                elementalType: true,
+                rarity: true,
+                isBoss: true,
+                health: true,
+                physicalAttack: true,
+                specialAttack: true,
+                physicalDefense: true,
+                specialDefense: true,
+                speed: true
+              }
+            },
             statusEffects: true,
             buffs: true
           }

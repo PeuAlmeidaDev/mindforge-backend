@@ -6,17 +6,26 @@ const repository = new HouseAssignmentRepository();
 // Mapeamento de interesses para casas
 const interestToHouseMapping: InterestToHouseMap = {
   // Formato: 'ID do interesse': ['ID da Casa 1', 'ID da Casa 2', ...]
+  // Casa 1 (Kazoku No Okami) - Disciplina, físico, organização
   'saude-fitness': ['casa1', 'casa4'],
-  'criatividade-expressao': ['casa2', 'casa3', 'casa5'],
-  'aprendizado-desenvolvimento': ['casa3', 'casa5', 'casa2'],
-  'sustentabilidade-lifestyle': ['casa2', 'casa5'],
-  'estudos-academicos-profissional': ['casa3', 'casa1'],
-  'condicionamento-fisico': ['casa1', 'casa4'],
-  'artes-marciais': ['casa1', 'casa4'],
-  'autoconhecimento-mindset': ['casa3', 'casa5'],
-  'organizacao-produtividade': ['casa1', 'casa3'],
-  'saude-bem-estar': ['casa4', 'casa5'],
-  'relacoes-impacto-social': ['casa2', 'casa5']
+  'condicionamento-fisico': ['casa1'],
+  'artes-marciais': ['casa1'],
+  'estudos-academicos-profissional': ['casa1'],
+  
+  // Casa 2 (Águas Flamejantes) - Criatividade, expressão, fluidez
+  'organizacao-produtividade': ['casa2'],
+  'relacoes-impacto-social': ['casa2'],
+  
+  // Casa 3 (Três Faces) - Conhecimento, adaptabilidade, estratégia
+  'aprendizado-desenvolvimento': ['casa3'],
+  'criatividade-expressao': ['casa3'],
+  
+  // Casa 4 (Chamas do Rugido) - Força, coragem, proteção
+  'saude-bem-estar': ['casa4'],
+  
+  // Casa 5 (Espírito Dourado) - Sabedoria, crescimento interno, equilíbrio
+  'autoconhecimento-mindset': ['casa5'],
+  'sustentabilidade-lifestyle': ['casa5']
 };
 
 /**
@@ -75,10 +84,18 @@ export const determineUserHouse = async (interestIds: string[]): Promise<string>
         .filter(([_, votes]) => votes === maxVotes)
         .map(([houseId, _]) => houseId);
       
+      console.log("Empate ou sem votos, sorteando entre as casas:", topHouses);
+      
+      // Se não houver casas com votos, sortear entre todas
+      if (topHouses.length === 0) {
+        topHouses.push(...houses.map(h => h.id));
+      }
+      
       // Escolher aleatoriamente entre as casas empatadas
       recommendedHouseId = topHouses[Math.floor(Math.random() * topHouses.length)];
     }
 
+    console.log("Casa recomendada:", recommendedHouseId, "com", maxVotes, "votos");
     return recommendedHouseId;
   } catch (error) {
     console.error('Erro ao determinar casa do usuário:', error);
@@ -119,6 +136,9 @@ export const setupHouseMapping = async (): Promise<void> => {
       houseNameToIdMap[houseName] = house.id;
     });
 
+    // Adicionar log para debug
+    console.log('Mapeamento de casas: ', houseNameToIdMap);
+
     // Atualizar o mapeamento com os IDs reais
     const newMapping: InterestToHouseMap = {};
     
@@ -132,9 +152,16 @@ export const setupHouseMapping = async (): Promise<void> => {
                         houseName === 'casa5' ? 'Espírito Dourado' :
                         houseName;
         
-        return houseNameToIdMap[houseKey] || houseName;
+        const mappedId = houseNameToIdMap[houseKey];
+        if (!mappedId) {
+          console.warn(`Casa não encontrada para o nome: ${houseKey}`);
+        }
+        return mappedId || houseName;
       });
     });
+
+    // Log do novo mapeamento para debug
+    console.log('Novo mapeamento de interesses para casas:', newMapping);
 
     // Substituir o mapeamento original pelo novo com IDs reais
     Object.assign(interestToHouseMapping, newMapping);

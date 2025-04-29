@@ -3,6 +3,26 @@ import { Battle, BattleParticipant } from '@prisma/client';
 import * as turnService from './turn.service';
 
 /**
+ * Obtém o ID de um representante do time vencedor
+ */
+const getWinnerTeamRepresentativeId = (participants: BattleParticipant[], winnerTeam: string): string | null => {
+  // Filtrar os participantes do time vencedor que ainda estão vivos
+  const teamParticipants = participants.filter(
+    p => p.teamId === winnerTeam && p.currentHealth > 0
+  );
+  
+  // Se encontrar algum participante, retorna o ID do primeiro
+  if (teamParticipants.length > 0) {
+    return teamParticipants[0].id;
+  }
+  
+  // Caso não encontre nenhum participante vivo (situação rara), 
+  // retorna o ID do primeiro participante do time independente do estado
+  const anyTeamParticipant = participants.find(p => p.teamId === winnerTeam);
+  return anyTeamParticipant?.id || null;
+};
+
+/**
  * Verifica o estado atual da batalha
  */
 export const checkBattleState = async (battleId: string): Promise<{
@@ -49,7 +69,7 @@ export const checkBattleState = async (battleId: string): Promise<{
       const winnerTeam = teamStatus.playerDefeated ? 'enemy' : 'player';
       
       // Determinar o ID do vencedor (pode ser um representante do time)
-      let winnerId: string | null = null;
+      let winnerId: string | null = getWinnerTeamRepresentativeId(battle.participants, winnerTeam);
       
       // Atualiza o status da batalha
       const updatedBattle = await prisma.battle.update({
@@ -160,8 +180,15 @@ export const finalizeBattle = async (
     // Determinar o ID do vencedor (pode ser um representante do time)
     let winnerId: string | null = null;
     
-    // Aqui você pode implementar a lógica para obter o ID de um representante do time vencedor
-    // Por exemplo, buscando o primeiro participante do time vencedor
+    if (winnerTeam) {
+      // Buscar participantes da batalha
+      const participants = await prisma.battleParticipant.findMany({
+        where: { battleId }
+      });
+      
+      // Obter o ID de um representante do time vencedor
+      winnerId = getWinnerTeamRepresentativeId(participants, winnerTeam);
+    }
     
     // Finaliza a batalha
     const updatedBattle = await prisma.battle.update({
