@@ -1,4 +1,4 @@
-import { prisma } from '../index';
+import { prisma } from '../lib/prisma';
 import { House } from '@prisma/client';
 import { NotFoundError, InternalServerError } from '../utils/error';
 

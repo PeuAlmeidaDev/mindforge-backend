@@ -1,5 +1,5 @@
 import { BattleParticipant, Battle, Skill } from '@prisma/client';
-import { prisma } from '../index';
+import { prisma } from '../lib/prisma';
 import { 
   BattleAction, 
   BattleActionResult, 

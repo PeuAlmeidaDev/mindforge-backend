@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import PrismaInstance, { prisma } from './database/prisma';
+import { prisma } from './lib/prisma';
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
 import goalRoutes from './routes/goal.routes';
@@ -50,9 +50,10 @@ app.listen(PORT, async () => {
 
 // Tratamento de erros e encerramento
 process.on('SIGINT', async () => {
-  await PrismaInstance.disconnect();
+  await prisma.$disconnect();
   console.log('Conexão com o banco de dados fechada');
   process.exit(0);
 });
 
+export { prisma };
 export default app; 
